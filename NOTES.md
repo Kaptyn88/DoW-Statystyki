@@ -3,6 +3,11 @@
 > Uruchamianie: start.bat (instrukcja: INSTRUKCJA.md). Repozytorium git (gałąź main) od 2026-10-17;
 > pomijane: .venv, probe/bin|obj|logs, recordings, catalog/catalog.json, viewer/settings.json.
 > MinHook v1.3.4 dołączony w third_party/minhook (bez własnego .git).
+> GitHub (publiczne): https://github.com/Kaptyn88/DoW-Statystyki – wydanie v1.0 z paczką 2026-10-18.
+> Nowe wydanie: commit -> git tag -a vX.Y -> .venv\Scripts\python package\make_package.py vX.Y ->
+> git push --tags -> na GitHubie "Create a new release" z tagiem i zipem z dist\ (brak gh CLI na tym PC).
+> Paczka: Podglad.exe (PyInstaller --onefile, katalog nazw budowany z gry odbiorcy przy 1. uruchomieniu),
+> bin\dowrec.dll + dowprobe_launcher.exe (gra z bibliotek Steam: libraryfolders.vdf, app 3556750), Start.bat.
 
 ## Cel
 Nakładka/podgląd do powtórek Dawn of War: Definitive Edition (jak statystyki w SC2): dla wybranego oddziału
