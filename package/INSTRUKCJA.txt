@@ -1,0 +1,66 @@
+DoW - statystyki powtórek (Dawn of War: Definitive Edition)
+===========================================================
+
+Co to robi
+----------
+Podczas oglądania POWTÓRKI liczy dla każdego oddziału: zadane obrażenia, zabite modele,
+otrzymane obrażenia i stracone modele – z podziałem na bronie, granaty i zdolności
+(moce duszy Mrocznych Eldarów jako osobny wiersz "Moce duszy").
+Pokazuje to w oknie "Podgląd" i w półprzezroczystej nakładce na grę.
+Kliknięcie oddziału w grze pokazuje jego statystyki.
+
+Wymagania
+---------
+- Windows 10/11 64-bit
+- Dawn of War: Definitive Edition ze Steam (Steam musi być włączony)
+- Nic więcej do instalowania nie trzeba.
+
+Uruchamianie
+------------
+1. Rozpakuj cały folder w dowolne miejsce (np. Dokumenty\DoW-Statystyki). Nie uruchamiaj z wnętrza zipa.
+2. Zamknij grę, jeśli działa.
+3. Kliknij dwa razy Start.bat.
+   - Przy pierwszym uruchomieniu Windows może pokazać "System Windows ochronił ten komputer"
+     (programy nie są podpisane): kliknij "Więcej informacji" -> "Uruchom mimo to".
+   - Za pierwszym razem podgląd przez ok. pół minuty buduje katalog nazw z plików Twojej gry
+     (komunikat na dole okna). Potem nazwy oddziałów i zdolności są po polsku.
+4. Otworzy się okno Podglądu i gra. Jeśli gra stoi na czarnym ekranie – kliknij jej okno.
+5. W grze: Powtórki -> wybierz powtórkę -> Odtwórz. Statystyki zbierają się od pierwszej sekundy,
+   możesz oglądać normalnie albo na przyspieszeniu.
+
+Powtórki gra trzyma w folderze:
+   %APPDATA%\Relic Entertainment\Dawn of War\PLAYBACK
+(wklej to w pasek adresu Eksploratora). Nie nazywaj własnych plików "temp.rec" – gra go nadpisuje.
+
+Podgląd
+-------
+- Tabela oddziałów: zadane, udział %, zabite, otrzymane, stracone, FF (ogień w swoich).
+  Kliknięcie nagłówka sortuje, lista "Gracz" filtruje.
+- Kliknięcie oddziału (w tabeli albo w grze): szczegóły – broń i zdolności, wykres w czasie,
+  komu zadał i od kogo dostał.
+- Suwak "Czas" pokazuje stan z dowolnej chwili, "Na żywo" wraca do bieżącej.
+- "Otwórz…" – wcześniejsze nagrania (folder recordings obok Start.bat).
+
+Nakładka na grę
+---------------
+Przycisk "Nakładka…" w Podglądzie: włącz, wybierz liczbę oddziałów (2–5), sortowanie,
+graczy, kolumny, przezroczystość, wielkość tekstu, sekcję zaznaczonego oddziału.
+Przeciągnij nakładkę myszą w wygodne miejsce i zaznacz "Zablokuj nakładkę" – wtedy kliknięcia
+przechodzą przez nią do gry. Działa w trybie okna bez ramki (domyślny w DE).
+
+Bezpieczeństwo
+--------------
+- Pliki gry NIE są zmieniane. Rejestrator wczytuje się tylko do gry uruchomionej przez Start.bat.
+- Działa tylko przy odtwarzaniu powtórek. Gdy zaczniesz mecz na żywo, sam się wyłącza.
+  Do gry sieciowej / rankingowej uruchamiaj grę normalnie przez Steam, nie przez Start.bat.
+- Program antywirusowy może się czepiać (dołączanie się do procesu gry). To ten sam mechanizm,
+  którego używają nakładki i narzędzia do gier; kod źródłowy jest na GitHubie.
+
+Gdy coś nie działa
+------------------
+- Dzienniki: folder logs (najnowszy plik rec_*.log). Nagrania: folder recordings.
+- Po aktualizacji gry może przestać działać, jeśli w dzienniku pojawi się "ERR ... nie znaleziono".
+  Wyślij wtedy ten plik autorowi.
+
+Narzędzie nieoficjalne, niezwiązane z Relic Entertainment ani SEGA.
+Używa biblioteki MinHook (licencja w folderze LICENCJE).

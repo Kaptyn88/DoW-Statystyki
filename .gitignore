@@ -1,0 +1,18 @@
+# środowisko Pythona i pamięć podręczna
+.venv/
+__pycache__/
+*.pyc
+
+# pliki zbudowane (probe\build.bat)
+probe/bin/
+probe/obj/
+
+# dane z gry i użytkownika (odtwarzalne albo prywatne)
+probe/logs/
+recordings/
+catalog/catalog.json
+viewer/settings.json
+
+# paczka (package/make_package.py)
+build/
+dist/

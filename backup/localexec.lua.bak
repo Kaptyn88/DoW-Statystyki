@@ -1,0 +1,104 @@
+-- localexec.lua : PlaybackStats v0.1 (test)
+-- Nic sie nie dzieje, dopoki nie wcisniesz Alt+Shift+S w trakcie powtorki / gry.
+-- Skrypt tylko ODCZYTUJE stan (zdrowie i liczbe modeli jednostek), nie zmienia gry.
+-- Wyniki: print() do logu/konsoli + liczba na ekranie (modele stracone, gracz 0).
+-- Usuniecie tego pliku calkowicie wylacza dodatek.
+
+PS_CODE = [[
+if PS_RUNNING == nil then
+  PS_RUNNING = 1
+  PS_DATA = {}
+  PS_CUR = {}
+  PS_PL = 0
+  PS_N = 0
+
+  PS_Each = function(gid, idx, sq)
+    local id = Squad_GetGameID(sq)
+    PS_CUR[id] = 1
+    local h = Squad_GetHealth(sq)
+    local c = Squad_Count(sq)
+    local d = PS_DATA[id]
+    if d == nil then
+      PS_DATA[id] = { bp = Squad_GetBlueprintName(sq), pl = PS_PL, h = h, c = c, hl = 0, ml = 0, dead = 0 }
+    else
+      if h < d.h then d.hl = d.hl + (d.h - h) end
+      if c < d.c then d.ml = d.ml + (d.c - c) end
+      d.h = h
+      d.c = c
+    end
+    return false
+  end
+
+  PS_Tick = function()
+    PS_CUR = {}
+    local n = World_GetPlayerCount()
+    for i = 0, n - 1 do
+      PS_PL = i
+      SGroup_ForEach(Player_GetSquads(World_GetPlayerAt(i)), PS_Each)
+    end
+    for id, d in pairs(PS_DATA) do
+      if d.dead == 0 and PS_CUR[id] == nil then
+        d.dead = 1
+        d.hl = d.hl + d.h
+        d.ml = d.ml + d.c
+        d.h = 0
+        d.c = 0
+      end
+    end
+    PS_N = PS_N + 1
+    if math.mod(PS_N, 10) == 0 then PS_Report() end
+  end
+
+  PS_Report = function()
+    local n = World_GetPlayerCount()
+    for i = 0, n - 1 do
+      local list = {}
+      local tml = 0
+      local thl = 0
+      for id, d in pairs(PS_DATA) do
+        if d.pl == i then
+          tml = tml + d.ml
+          thl = thl + d.hl
+          table.insert(list, d)
+        end
+      end
+      table.sort(list, function(a, b) return a.hl > b.hl end)
+      print(string.format("[PS] t=%d P%d modele_stracone=%d zdrowie_stracone=%d", World_GetGameTime(), i, tml, thl))
+      for k = 1, 5 do
+        local d = list[k]
+        if d ~= nil then
+          print(string.format("[PS]    %s  hl=%d ml=%d dead=%d", d.bp, d.hl, d.ml, d.dead))
+        end
+      end
+      if i == 0 then
+        if PS_SHOWN == nil then
+          PS_SHOWN = 1
+          WinWarning_Add("ps_p0", World_GetPlayerAt(0), "", "", "")
+        end
+        WinWarning_SetText("ps_p0", Loc_ConvertNumber(tml))
+      end
+    end
+  end
+
+  Rule_AddInterval(PS_Tick, 1)
+  print("[PS] PlaybackStats uruchomione")
+end
+]]
+
+
+-- diagnostyka: zapisuje znacznik do pliku, zeby sprawdzic czy ten plik w ogole sie wykonal
+PS_Mark = function(txt)
+  pcall(function()
+    local f = io.open("ps_log.txt", "a")
+    if f then f:write(txt .. "\n") f:close() end
+  end)
+end
+PS_Mark("localexec.lua zaladowany")
+
+PS_Press = function()
+  PS_Mark("nacisnieto Alt+Shift+S")
+  Scar_DoString(PS_CODE)
+  PS_Mark("Scar_DoString wywolane")
+end
+
+bind("Alt+Shift+S", "PS_Press()")

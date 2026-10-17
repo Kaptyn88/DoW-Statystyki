@@ -1,0 +1,2 @@
+# pliki wsadowe Windows muszą mieć CRLF (cmd źle obsługuje skoki/etykiety przy samym LF)
+*.bat text eol=crlf
