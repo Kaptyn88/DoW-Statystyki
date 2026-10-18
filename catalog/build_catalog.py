@@ -9,13 +9,16 @@ import collections
 import json
 import os
 import re
+import struct
 import sys
 
+import icons
 from rgd import Dictionary, parse
 from sga import SgaArchive
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BS = chr(92)  # ukośnik wsteczny
+ICON_DIR = BS.join(['art', 'ui', 'ingame', ''])  # ikony jednostek: art/ui/ingame/<rasa>_icons/<nazwa>.tga
 DEFAULT_GAME = r'C:\Program Files (x86)\Steam\steamapps\common\Dawn of War Definitive Edition'
 LAYERS = [('DoWDE', r'DoWDE\DoWDE.sga'), ('DXP3', r'DXP3\DXP3Data.sga'), ('DXP2', r'DXP2\DXP2Data.sga'),
           ('WXP', r'WXP\WXPData.sga'), ('W40k', r'W40k\W40kData.sga')]
@@ -52,7 +55,7 @@ class Vfs:
         self.index = {}
         for name, a in reversed(self.archives):  # niższe najpierw, wyższe nadpisują
             for path in a.files:
-                if path.startswith('attrib\\'):
+                if path.startswith('attrib\\') or path.startswith(ICON_DIR):  # dane + ikony jednostek
                     self.index[path] = (name, a)
 
     def list(self, prefix):
@@ -92,6 +95,38 @@ def screen_name(t):
             if tid and (best is None or len(path) < best[0]):
                 best = (len(path), tid)
     return best[1] if best else None
+
+
+def icon_name(t):
+    """Najpłycej położone ui_info/icon_name, np. 'eldar_icons/farseer_icon' (pusty napis -> None)."""
+    best = None
+    for path, v in walk(t):
+        if path[-1] == 'icon_name' and len(path) >= 2 and path[-2] == 'ui_info' and isinstance(v, str) and v.strip():
+            if best is None or len(path) < best[0]:
+                best = (len(path), v.strip().lower())
+    return best[1] if best else None
+
+
+def extract_icons(vfs, cat, out_dir):
+    """Ikony oddziałów, jednostek i zdolności: TGA z gry -> out_dir/icons/<nazwa>_<rozmiar>.png.
+    Zapisuje cat['icons'] = {nazwa ikony: rdzeń nazwy pliku}; brakujące w archiwach pomija."""
+    os.makedirs(os.path.join(out_dir, 'icons'), exist_ok=True)
+    wanted = {e['icon'] for kind in ('squads', 'units', 'abilities') for e in cat[kind].values() if e.get('icon')}
+    done = {}
+    for icon in sorted(wanted):
+        src = ICON_DIR + icon.replace('/', BS) + '.tga'
+        if src not in vfs.index:
+            continue
+        try:
+            w, h, rows = icons.read_tga(vfs.read(src)[1])
+        except (ValueError, IndexError, struct.error):
+            continue
+        stem = icons.file_stem(icon)
+        for size in icons.SIZES:
+            icons.write_png(os.path.join(out_dir, 'icons', f'{stem}_{size}.png'), icons.resize(w, h, rows, size))
+        done[icon] = stem
+    cat['icons'] = done
+    return len(done), len(wanted)
 
 
 def damage_of(t):
@@ -194,7 +229,7 @@ def _build(args):
                 print('  pominięto', p, e, file=sys.stderr)
         return out
 
-    cat = {'version': 2, 'abilities': {}, 'weapons': {}, 'units': {}, 'squads': {}, 'source': {
+    cat = {'version': 3, 'abilities': {}, 'weapons': {}, 'units': {}, 'squads': {}, 'source': {
         'layers': [n for n, _ in vfs.archives], 'ucs': 'Engine/Locale/{Polish,English,Russian}/Engine.ucs'}}
 
     for p, (layer, t) in load('attrib\\abilities\\').items():
@@ -202,7 +237,7 @@ def _build(args):
         mn, mx = damage_of(t)
         ae = t.get('area_effect', {}).get('area_effect_information', {}) if isinstance(t.get('area_effect'), dict) else {}
         child = t.get('child_ability_name') or ''
-        cat['abilities'][name] = {**names(screen_name(t)), 'race': race_of(name), 'layer': layer,
+        cat['abilities'][name] = {**names(screen_name(t)), 'icon': icon_name(t), 'race': race_of(name), 'layer': layer,
                                   'child': child.lower() if isinstance(child, str) else '',
                                   'damage': [round(mn, 1), round(mx, 1)], 'radius': ae.get('radius', 0.0),
                                   'duration': t.get('duration_time', 0.0), 'recharge': t.get('recharge_time', 0.0),
@@ -216,7 +251,7 @@ def _build(args):
         for p, (layer, t) in load(prefix).items():
             parts = p.split('\\')
             name = os.path.splitext(parts[-1])[0]
-            entry = {**names(screen_name(t)), 'race': parts[3], 'category': parts[4] if len(parts) > 5 else '',
+            entry = {**names(screen_name(t)), 'icon': icon_name(t), 'race': parts[3], 'category': parts[4] if len(parts) > 5 else '',
                      'layer': layer, 'abilities': sorted(refs(t, 'abilities'))}
             if kind == 'units':
                 entry['weapons'] = sorted(refs(t, 'weapon'))
@@ -281,6 +316,9 @@ def _build(args):
         owners = set(a['units']) | set(abil.get(a.get('root', ''), {}).get('units', []))
         a['global'] = any(cat['units'].get(u, {}).get('category') == 'structures' and re.search(r'_hq($|_)', u)
                           for u in owners)
+
+    got, want = extract_icons(vfs, cat, os.path.dirname(os.path.abspath(args.out)))
+    print(f'ikony: {got}/{want} (PNG {icons.SIZES} px w folderze icons)')
 
     with open(args.out, 'w', encoding='utf-8') as f:
         json.dump(cat, f, ensure_ascii=False, indent=1, sort_keys=True)

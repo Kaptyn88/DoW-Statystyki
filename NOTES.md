@@ -297,6 +297,17 @@ Przykładowa powtórka: Downloads\...W-NEC-L-ORK.rec (Necron vs Ork, mapa 2P_TIT
   UTF-8 przy przekierowaniu; --check (gra znaleziona i nie działa) dla Start.bat, który nie ma już własnych tekstów.
 - Paczka: INSTRUKCJA.txt, INSTRUCTIONS_EN.txt, INSTRUKCIYA_RU.txt; make_package.py --no-build (bez MSVC).
 
+## Ikony jednostek (v1.2, 2026-10-18)
+- Źródło: klasyczne TGA 64x64 w archiwach: art\ui\ingame\<rasa>_icons\<nazwa>.tga (typ 2, 32 bit; wszystkie rasy).
+  Remaster ma .rtx (DoWDE.sga, *SharedTextures-Definitive) i .dds (art\ui\swf\icons) – nieużywane.
+- Nazwa ikony: ui_info/icon_name w RGD (najpłytsze), np. 'eldar_icons/farseer_icon'. Oddziały 424/452 mają plik;
+  bez własnej ikony (np. guard_squad_command) -> ikona pierwszej jednostki oddziału. Moce gracza -> ikona ich
+  najmocniejszej zdolności.
+- catalog/icons.py: TGA -> PNG (czysty Python, zlib), średnia z bloków do 20/26/32 px, zapis w catalog/icons
+  (428 ikon, ~30 s budowy razem z katalogiem). Katalog "version": 3 – podgląd znajomego przebuduje go sam.
+- Podgląd: kolumna ikon (Treeview #0, wiersz 24 px) i ikona 32 px przy nazwie w szczegółach; nakładka: ikona
+  ~2x wielkości tekstu przy nazwie oddziału i w sekcji zaznaczonego oddziału (viewer/iconcache.py).
+
 ## Docelowy projekt rejestratora (zrealizowany powyżej, notatka historyczna)
 - Hooki: ApplyDamage (wejście/wyjście), SetHealth (faktyczna strata HP), Death (zgon) + bezpiecznik .rec + World (czas).
 - Zdarzenie na każde skuteczne ApplyDamage: tick, atakujący (id, bp, squadId, owner), ofiara (to samo), broń

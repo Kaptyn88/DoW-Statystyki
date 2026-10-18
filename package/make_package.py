@@ -49,7 +49,7 @@ def main():
     pyinstaller = os.path.join(ROOT, '.venv', 'Scripts', 'pyinstaller.exe')
     run([pyinstaller, '--noconfirm', '--clean', '--onefile', '--windowed', '--name', 'Podglad',
          '--paths', 'viewer', '--paths', 'catalog',
-         '--hidden-import', 'build_catalog', '--hidden-import', 'sga', '--hidden-import', 'rgd',
+         '--hidden-import', 'build_catalog', '--hidden-import', 'sga', '--hidden-import', 'rgd', '--hidden-import', 'icons',
          '--distpath', os.path.join(WORK, 'dist'), '--workpath', os.path.join(WORK, 'work'),
          '--specpath', WORK, os.path.join('viewer', 'dow_viewer.py')])
     # 3. złożenie folderu paczki

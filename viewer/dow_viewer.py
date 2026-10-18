@@ -14,6 +14,7 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 
 import i18n
+import iconcache
 import paths
 import recmodel
 from i18n import t
@@ -23,7 +24,7 @@ from recmodel import Recording
 REC_DIR = paths.REC_DIR
 PLAYER_COLORS = ['#2f6fdf', '#d9452b', '#2e9e4f', '#b8860b', '#8e44ad', '#16a085', '#c0392b', '#7f8c8d']
 COLUMNS = [  # (id, klucz tekstu nagłówka, szerokość, wyrównanie)
-    ('rank', None, 32, 'e'), ('unit', 'col_unit', 180, 'w'), ('player', 'col_player', 120, 'w'),
+    ('rank', None, 30, 'e'), ('unit', 'col_unit', 160, 'w'), ('player', 'col_player', 110, 'w'),
     ('dealt', 'col_dealt', 64, 'e'), ('share', 'col_share', 56, 'e'), ('kills', 'col_kills', 52, 'e'),
     ('taken', 'col_taken', 74, 'e'), ('lost', 'col_lost', 64, 'e'), ('ff', None, 48, 'e'),
 ]
@@ -45,7 +46,10 @@ class Viewer(tk.Tk):
         self.title(t('title'))
         self.geometry('1260x700')
         self.minsize(1140, 520)
-        ttk.Style(self).theme_use('clam')
+        style = ttk.Style(self)
+        style.theme_use('clam')
+        style.configure('Treeview', rowheight=24)  # miejsce na ikonę 20 px
+        iconcache.clear()
         self.restart = None       # (plik, śledź najnowsze) przy zmianie języka – main() tworzy okno od nowa
         self.rec = None
         self.follow_newest = tk.BooleanVar(value=path is None if follow_newest is None else follow_newest)
@@ -106,12 +110,13 @@ class Viewer(tk.Tk):
 
         body = ttk.Frame(self)
         body.pack(fill='both', expand=True, padx=8, pady=8)
-        body.columnconfigure(0, weight=3, minsize=700)  # tabela mieści wszystkie kolumny
+        body.columnconfigure(0, weight=3, minsize=720)  # tabela (z kolumną ikon) mieści wszystkie kolumny
         body.columnconfigure(1, weight=2, minsize=420)
         body.rowconfigure(0, weight=1)
 
         left = ttk.Frame(body)
-        self.tree = ttk.Treeview(left, columns=[c[0] for c in COLUMNS], show='headings', selectmode='browse')
+        self.tree = ttk.Treeview(left, columns=[c[0] for c in COLUMNS], show='tree headings', selectmode='browse')
+        self.tree.column('#0', width=34, minwidth=34, stretch=False, anchor='center')  # kolumna ikony
         for cid, key, width, anchor in COLUMNS:
             head = t(key) if key else ('#' if cid == 'rank' else 'FF')
             self.tree.heading(cid, text=head, command=lambda c=cid: self._sort_by(c))
@@ -124,7 +129,7 @@ class Viewer(tk.Tk):
         left.grid(row=0, column=0, sticky='nsew')
 
         right = ttk.Frame(body, padding=(10, 0))
-        self.d_title = ttk.Label(right, text=t('pick_squad'), font=('Segoe UI', 13, 'bold'))
+        self.d_title = ttk.Label(right, text=t('pick_squad'), font=('Segoe UI', 13, 'bold'), compound='left')
         self.d_title.pack(anchor='w')
         self.d_sub = ttk.Label(right, text='', foreground='#555')
         self.d_sub.pack(anchor='w', pady=(0, 6))
@@ -316,7 +321,8 @@ class Viewer(tk.Tk):
         for k in rows:
             c = st.S[k]
             p = rec.units.get(k, {}).get('pid')
-            iid = self.tree.insert('', 'end', tags=(f'p{p}',), values=(
+            img = iconcache.photo(st.unit_icon(k, 20))
+            iid = self.tree.insert('', 'end', tags=(f'p{p}',), image=img or '', values=(
                 ranking.index(k) + 1, rec.unit_label(k), rec.players.get(p, '?'), f"{c['dealt']:.0f}",
                 f"{100 * c['dealt'] / total:.1f}%", c['kills'], f"{c['taken']:.0f}", c['lost'],
                 f"{c['ff']:.0f}" if c['ff'] else ''))
@@ -348,7 +354,8 @@ class Viewer(tk.Tk):
         c = st.S[k]
         u = rec.units.get(k, {})
         pid = u.get('pid')
-        self.d_title.configure(text=rec.unit_label(k))
+        img = iconcache.photo(st.unit_icon(k, 32))
+        self.d_title.configure(text=(' ' + rec.unit_label(k)) if img else rec.unit_label(k), image=img or '')
         r_all, n_all = st.rank_of(k)
         r_own, n_own = st.rank_of(k, pid)
         self.d_sub.configure(text=t('detail_sub', player=rec.players.get(pid, '?'), bp=u.get('bp', '?'),

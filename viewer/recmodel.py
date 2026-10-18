@@ -12,7 +12,9 @@ TPS_DEFAULT = 8
 from i18n import lang, t
 from paths import CATALOG_PATH
 
-CATALOG_VERSION = 2  # 2: nazwy pl/en/ru; starszy katalog podgląd buduje od nowa
+CATALOG_VERSION = 3  # 2: nazwy pl/en/ru; 3: ikony; starszy katalog podgląd buduje od nowa
+ICONS_DIR = os.path.join(os.path.dirname(CATALOG_PATH), 'icons')
+ICON_SIZES = (20, 26, 32)  # jak catalog/icons.py
 
 
 class Catalog:
@@ -42,6 +44,38 @@ class Catalog:
 
     def _name(self, kind, key):
         return self._pick(self.c.get(kind, {}).get((key or '').lower()))
+
+    # -- ikony (catalog/icons/<rdzeń>_<rozmiar>.png, zbudowane z plików gry)
+    def icon_file(self, icon, size):
+        stem = self.c.get('icons', {}).get(icon) if icon else None
+        if not stem:
+            return None
+        size = min(ICON_SIZES, key=lambda s: abs(s - size))
+        path = os.path.join(ICONS_DIR, f'{stem}_{size}.png')
+        return path if os.path.exists(path) else None
+
+    def squad_icon(self, bp):
+        """Ikona oddziału; gdy oddział nie ma własnej (np. Oddział Dowodzenia Gwardii) – ikona jego pierwszej jednostki."""
+        have = self.c.get('icons', {})
+        for kind in ('squads', 'units'):
+            v = self.c.get(kind, {}).get((bp or '').lower())
+            if not v:
+                continue
+            if v.get('icon') in have:
+                return v['icon']
+            for u in v.get('units', []):
+                uv = self.c.get('units', {}).get(u, {})
+                if uv.get('icon') in have:
+                    return uv['icon']
+        return None
+
+    def ability_icon(self, name):
+        v = self.c.get('abilities', {}).get((name or '').lower())
+        if not v:
+            return None
+        have = self.c.get('icons', {})
+        root = self.c['abilities'].get(v.get('root', ''), {})
+        return next((i for i in (v.get('icon'), root.get('icon')) if i in have), None)
 
     def is_structure(self, bp):
         v = self.c.get('units', {}).get((bp or '').lower())
@@ -305,6 +339,17 @@ class Stats:
         units = known | set(self.S)
         # encje pomocnicze mocy gracza bez własnych statystyk nie są oddziałami
         return {k for k in units if k not in self.rec.power_helpers or any(self.S[k].values())}
+
+    def unit_icon(self, k, size):
+        """Plik PNG ikony wiersza: oddział/encja -> ikona z katalogu; moce gracza -> ikona ich najmocniejszej zdolności."""
+        if k[0] == 'powers':
+            for w, _ in self.weap[k].most_common():
+                if isinstance(w, tuple) and w[0] == 'ab':
+                    icon = CATALOG.ability_icon(w[1])
+                    if icon:
+                        return CATALOG.icon_file(icon, size)
+            return None
+        return CATALOG.icon_file(CATALOG.squad_icon(self.rec.units.get(k, {}).get('bp')), size)
 
     def total_dealt(self, pid=None):
         return sum(c['dealt'] for k, c in self.S.items() if pid is None or self.rec.units.get(k, {}).get('pid') == pid)

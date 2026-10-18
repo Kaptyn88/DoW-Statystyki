@@ -11,6 +11,7 @@ import tkinter as tk
 from dataclasses import asdict, dataclass, fields
 from tkinter import ttk
 
+import iconcache
 import paths
 from i18n import t
 from recmodel import Recording
@@ -158,8 +159,13 @@ class Overlay(tk.Toplevel):
         bold = ('Segoe UI', s.font_size, 'bold')
         small = ('Segoe UI', max(7, s.font_size - 2))
 
-        def label(text, row, col, fg='#e6e9ec', f=font, anchor='w', padx=(0, 10), **grid):
+        icon_px = s.font_size * 2  # ikona mniej więcej na wysokość wiersza
+
+        def label(text, row, col, fg='#e6e9ec', f=font, anchor='w', padx=(0, 10), image=None, **grid):
             w = tk.Label(self.body, text=text, fg=fg, bg=self.BG, font=f, anchor=anchor)
+            if image:  # ikona jednostki z lewej strony nazwy
+                w.configure(image=image, compound='left', padx=0)
+                w.image = image
             w.grid(row=row, column=col, sticky='we' if anchor == 'w' else 'e', padx=padx, **grid)
             self.bind_all_drag(w)
             return w
@@ -211,7 +217,8 @@ class Overlay(tk.Toplevel):
             for n, k in enumerate(units, 1):
                 c = st.S[k]
                 upid = rec.units.get(k, {}).get('pid')
-                label(f'{n}. {rec.unit_label(k)}', row, 0, fg=pcolor.get(upid, '#e6e9ec'))
+                label(f' {n}. {rec.unit_label(k)}', row, 0, fg=pcolor.get(upid, '#e6e9ec'),
+                      image=iconcache.photo(st.unit_icon(k, icon_px)))
                 vals = {'dealt': f"{c['dealt']:.0f}", 'share': f"{100 * c['dealt'] / total:.0f}%",
                         'kills': str(c['kills']), 'lost': str(c['lost'])}
                 for i, (cid, _) in enumerate(cols):
@@ -231,7 +238,8 @@ class Overlay(tk.Toplevel):
                                                                 pady=(6, 4))
                 row += 1
                 more = f'  (+{len(sel) - 1})' if len(sel) > 1 else ''
-                label(f'▶ {rec.unit_label(k)}{more}', row, 0, fg=pcolor.get(upid, '#e6e9ec'), f=bold, columnspan=span)
+                label(f' ▶ {rec.unit_label(k)}{more}', row, 0, fg=pcolor.get(upid, '#e6e9ec'), f=bold, columnspan=span,
+                      image=iconcache.photo(full.unit_icon(k, icon_px)))
                 row += 1
                 label(t('ov_sel_line', d=f"{c['dealt']:.0f}", k=c['kills'], l=c['lost']), row, 0, columnspan=span)
                 row += 1

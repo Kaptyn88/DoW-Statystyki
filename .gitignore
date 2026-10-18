@@ -16,3 +16,4 @@ viewer/settings.json
 # paczka (package/make_package.py)
 build/
 dist/
+catalog/icons/
