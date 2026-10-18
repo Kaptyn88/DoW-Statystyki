@@ -56,6 +56,8 @@ class Viewer(tk.Tk):
         self.live = tk.BooleanVar(value=True)
         self.follow_selection = tk.BooleanVar(value=True)
         self._sel_seq = 0
+        self._dirty = False       # są nowe dane od ostatniego pełnego odświeżenia
+        self._last_slow = 0.0     # czas ostatniego cyklu "co sekundę"
         self.topmost = tk.BooleanVar(value=False)
         self.player_filter = tk.StringVar(value=t('all_players'))
         self.lang_var = tk.StringVar(value=i18n.LANGS[i18n.lang()])
@@ -226,22 +228,53 @@ class Viewer(tk.Tk):
         if known:
             self.selected = known[0]
 
+    def _select_row_fast(self):
+        """Zaznaczenie z gry: podświetl istniejący wiersz i pokaż szczegóły z ostatnich statystyk (bez przeliczania)."""
+        if not hasattr(self, 'stats'):
+            self.refresh()
+            return
+        for iid, k in self._row_keys.items():
+            if k == self.selected:
+                self.tree.selection_set(iid)
+                self.tree.see(iid)
+                break
+        self._show_detail()
+        if self.overlay:
+            self.overlay.render(self.rec)
+
     def _tick(self):
+        """Co 0,1 s czyta nowe linie nagrania. Zmiana zaznaczenia w grze -> odświeżenie od razu (mniejsze opóźnienie);
+        pozostałe nowe dane (trafienia, zegar) -> pełne przeliczenie najwyżej raz na sekundę."""
         try:
-            if self.follow_newest.get():
-                n = newest_recording()
-                if n and (not self.rec or os.path.normcase(n) != os.path.normcase(self.rec.path)):
-                    self.open(n)
-            if self.rec and self.rec.poll():
-                self._apply_game_selection()
-                self.player_box.configure(values=[t('all_players')] + list(self.rec.players.values()))
-                self.refresh()
-            elif self.rec:
-                self._update_rec_status()
-            if self.overlay:
+            now = time.monotonic()
+            second = now - self._last_slow >= 1.0
+            if second:
+                self._last_slow = now
+                if self.follow_newest.get():
+                    n = newest_recording()
+                    if n and (not self.rec or os.path.normcase(n) != os.path.normcase(self.rec.path)):
+                        self.open(n)
+            if self.rec:
+                self._dirty |= bool(self.rec.poll())
+                sel_changed = self.follow_selection.get() and self.rec.selection_seq != self._sel_seq
+                if sel_changed:
+                    self._apply_game_selection()
+                    if not (self._dirty and second):
+                        self._select_row_fast()  # bez przeliczania statystyk – tylko wiersz, szczegóły i nakładka
+                if self._dirty and second:
+                    self._dirty = False
+                    self.player_box.configure(values=[t('all_players')] + list(self.rec.players.values()))
+                    self.refresh()
+                    if self.overlay:
+                        self.overlay.render(self.rec)
+                elif second:
+                    self._update_rec_status()
+                    if self.overlay:
+                        self.overlay.render(self.rec)
+            elif second and self.overlay:
                 self.overlay.render(self.rec)
         finally:
-            self.after(1000, self._tick)
+            self.after(100, self._tick)
 
     # ------------------------------------------------------------------ nakładka
     def _open_overlay_settings(self):

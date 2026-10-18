@@ -17,7 +17,7 @@
 //          ff = friendly fire (ten sam gracz)
 //   die    {tick, v, vs, by}                           – zgon spoza ApplyDamage (by = 0) lub innej encji niż ofiara
 //   clock  {tick}                                      – co ~1 s czasu rzeczywistego: bieżący tick powtórki
-//   sel    {tick, sq:[id oddziałów], e:[id encji]}     – zaznaczenie gracza w grze (przy zmianie, odczyt co ~0,2 s)
+//   sel    {tick, sq:[id oddziałów], e:[id encji]}     – zaznaczenie gracza w grze (przy zmianie, odczyt co ~0,1 s)
 //   hp     {tick, v, vs, hp, src}                      – spadek HP poza ApplyDamage (atakujący nieznany; src = ścieżka kodu)
 //   dmg bez broni (w=-1) ma dodatkowo src (ścieżka kodu), ab/abf (nazwa pliku i folder danych gry źródła, np.
 //          eldar_psychic_storm / abilities – hipoteza, zob. SourcePath) i abo (odległość ścieżki od r8, -1 = brak);
@@ -663,7 +663,7 @@ static bool ReadSelection(unsigned long* sq, int* nsq, unsigned long* en, int* n
     } __except (EXCEPTION_EXECUTE_HANDLER) { *nsq = *nen = 0; return false; }
 }
 
-// wołane co ~0,2 s z wątku roboczego; rekord "sel" tylko przy zmianie (i na początku każdej sesji)
+// wołane co ~0,1 s z wątku roboczego; rekord "sel" tylko przy zmianie (i na początku każdej sesji)
 static void PollSelection(int tick)
 {
     static char last[512];
@@ -726,10 +726,10 @@ static DWORD WINAPI InitThread(LPVOID)
 
     LONG applied = 0;
     for (unsigned iter = 0;; ++iter) {
-        // co 0,2 s zaznaczenie gracza; co 1 s zegar i zrzut buforów
-        DWORD w = WaitForSingleObject(g_armEvent, 200);
+        // co 0,1 s zaznaczenie gracza (v1.3; było 0,2 s); co 1 s zegar i zrzut buforów
+        DWORD w = WaitForSingleObject(g_armEvent, 100);
         if (w == WAIT_TIMEOUT && g_armed && selection) PollSelection(GameTicks());
-        if (w == WAIT_TIMEOUT && iter % 5 != 0) continue;
+        if (w == WAIT_TIMEOUT && iter % 10 != 0) continue;
         LONG want = g_armed;
         if (want != applied) {
             SetGameHooks(want != 0); applied = want;

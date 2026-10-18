@@ -32,7 +32,7 @@ def window_label(sec):
 
 @dataclass
 class OverlaySettings:
-    enabled: bool = False
+    enabled: bool = True          # domyślnie włączona (v1.3); wyłączenie zapisuje się w settings.json
     count: int = 3
     sort_by: str = 'dealt'
     mode: str = MODE_ALL          # MODE_ALL, MODE_EACH albo nazwa gracza
