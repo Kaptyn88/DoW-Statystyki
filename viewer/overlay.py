@@ -116,6 +116,8 @@ class Overlay(tk.Toplevel):
         self.body = tk.Frame(self, background=self.BG, padx=10, pady=6)
         self.body.pack(fill='both', expand=True)
         self._drag = None
+        self._cells = {}          # (rodzaj, wiersz, kolumna) -> (widget, ostatnia specyfikacja)
+        self._last_cells = None   # ostatni układ – bez zmian nic nie przerysowujemy
         self.bind_all_drag(self)
         self.geometry(f'+{settings.x}+{settings.y}')
         self.after(50, self.apply_window_style)
@@ -152,29 +154,53 @@ class Overlay(tk.Toplevel):
 
     # -- treść
     def render(self, rec: Recording):
-        for w in self.body.winfo_children():
-            w.destroy()
+        """Buduje listę komórek (tekst, kolor, ikona...) i nanosi tylko zmiany: etykiety są tworzone raz i potem
+        aktualizowane; gdy nic się nie zmieniło (np. pauza), okno nie jest w ogóle przerysowywane."""
+        cells = self._layout(rec)
+        if cells == self._last_cells:
+            return
+        self._last_cells = cells
+        used = set()
+        for c in cells:
+            key = (c['kind'], c['row'], c['col'])
+            used.add(key)
+            w, prev = self._cells.get(key, (None, None))
+            if w is None:
+                w = (tk.Frame(self.body, height=1, bg='#3a434c') if c['kind'] == 'sep'
+                     else tk.Label(self.body, bg=self.BG))
+                self.bind_all_drag(w)
+            if prev == c:
+                continue  # komórka bez zmian
+            if c['kind'] == 'label':
+                img = c['image'] or ''
+                w.configure(text=c['text'], fg=c['fg'], font=c['font'], anchor=c['anchor'], image=img,
+                            compound='left' if img else 'none', padx=0 if img else 1)
+                w.image = c['image']
+                w.grid(row=c['row'], column=c['col'], columnspan=c['span'], padx=c['padx'], pady=c['pady'],
+                       sticky='we' if c['anchor'] == 'w' else 'e')
+            else:
+                w.grid(row=c['row'], column=c['col'], columnspan=c['span'], sticky='we', pady=(6, 4))
+            self._cells[key] = (w, c)
+        for key in [k for k in self._cells if k not in used]:  # komórki z poprzedniego układu, których już nie ma
+            self._cells.pop(key)[0].destroy()
+
+    def _layout(self, rec: Recording):
         s = self.s
         font = ('Segoe UI', s.font_size)
         bold = ('Segoe UI', s.font_size, 'bold')
         small = ('Segoe UI', max(7, s.font_size - 2))
-
         icon_px = s.font_size * 2  # ikona mniej więcej na wysokość wiersza
+        cells = []
 
-        def label(text, row, col, fg='#e6e9ec', f=font, anchor='w', padx=(0, 10), image=None, **grid):
-            w = tk.Label(self.body, text=text, fg=fg, bg=self.BG, font=f, anchor=anchor)
-            if image:  # ikona jednostki z lewej strony nazwy
-                w.configure(image=image, compound='left', padx=0)
-                w.image = image
-            w.grid(row=row, column=col, sticky='we' if anchor == 'w' else 'e', padx=padx, **grid)
-            self.bind_all_drag(w)
-            return w
+        def label(text, row, col, fg='#e6e9ec', f=font, anchor='w', padx=(0, 10), image=None, columnspan=1, pady=0):
+            cells.append({'kind': 'label', 'row': row, 'col': col, 'text': text, 'fg': fg, 'font': f, 'anchor': anchor,
+                          'padx': padx, 'pady': pady, 'image': image, 'span': columnspan})
 
         if rec is None or (not rec.events and not rec.selection):
             label(t('ov_wait'), 0, 0, fg='#9aa3ab', f=small)
             if not s.locked:
                 label(t('ov_drag'), 1, 0, fg='#6b747c', f=small)
-            return
+            return cells
 
         tick = rec.max_tick
         from_tick = tick - s.window_s * rec.tps if s.window_s else None
@@ -234,8 +260,7 @@ class Overlay(tk.Toplevel):
                 c = full.S[k]
                 upid = rec.units.get(k, {}).get('pid')
                 span = 1 + max(1, len(cols))
-                tk.Frame(self.body, height=1, bg='#3a434c').grid(row=row, column=0, columnspan=span, sticky='we',
-                                                                pady=(6, 4))
+                cells.append({'kind': 'sep', 'row': row, 'col': 0, 'span': span})
                 row += 1
                 more = f'  (+{len(sel) - 1})' if len(sel) > 1 else ''
                 label(f' ▶ {rec.unit_label(k)}{more}', row, 0, fg=pcolor.get(upid, '#e6e9ec'), f=bold, columnspan=span,
@@ -243,6 +268,7 @@ class Overlay(tk.Toplevel):
                 row += 1
                 label(t('ov_sel_line', d=f"{c['dealt']:.0f}", k=c['kills'], l=c['lost']), row, 0, columnspan=span)
                 row += 1
+        return cells
 
 
 class OverlaySettingsWindow(tk.Toplevel):

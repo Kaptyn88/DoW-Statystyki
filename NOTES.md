@@ -317,6 +317,18 @@ Przykładowa powtórka: Downloads\...W-NEC-L-ORK.rec (Necron vs Ork, mapa 2P_TIT
 - Wydanie v1.2 obejmuje ikony + szybsze zaznaczenie + nakładkę domyślnie włączoną (tag v1.3 usunięty na prośbę
   użytkownika, v1.2 przeniesiony na ten commit przed publikacją wydania).
 
+## Optymalizacja wydajności (v1.3, 2026-10-18)
+- recmodel: statystyki "na żywo" liczone przyrostowo (_Acc dokarmiany nowymi zdarzeniami; ostatni tick wstrzymany
+  do następnego, bo np. wybuch generatora zapisuje rekordy nie po kolei; po 1,5 s bez przyrostu – dociągnięcie całości).
+  Wynik identyczny z pełnym przeliczeniem na 3 nagraniach. Pamięć podręczna etykiet jednostek i istnienia ikon.
+- Podgląd: tabela aktualizowana w miejscu (bez kasowania wierszy); nakładka tworzy etykiety raz i zmienia tylko
+  komórki, które się zmieniły (bez zmian – brak przerysowania).
+- Pomiar offline (symulacja powtórki x8): ~250 ms/s -> mediana 17,5 ms na cykl (p95 63 ms).
+- Rejestrator: linia "PERF hooki: X ms/s (N wywolan/s, max Y us) | zaznaczenie: Z ms/s" co 10 s w logu rec_*.log.
+  Pomiar na żywo (3v3, do 325 trafień/s): hooki <= 0,24 ms/s (~0,02% czasu gry), max pojedyncze wywołanie 0,12 ms;
+  zaznaczenie co 0,1 s ~0,08 ms/s. Podgląd: 5–7% jednego rdzenia w trakcie walki (osobny proces).
+  Użytkownik w AMD Adrenalin nie widzi różnicy FPS z nakładką i bez – zostawiono odświeżanie 0,1 s.
+
 ## Docelowy projekt rejestratora (zrealizowany powyżej, notatka historyczna)
 - Hooki: ApplyDamage (wejście/wyjście), SetHealth (faktyczna strata HP), Death (zgon) + bezpiecznik .rec + World (czas).
 - Zdarzenie na każde skuteczne ApplyDamage: tick, atakujący (id, bp, squadId, owner), ofiara (to samo), broń

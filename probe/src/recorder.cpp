@@ -55,6 +55,22 @@ static wchar_t      g_replayName[MAX_PATH];      // ostatnio otwarta do odczytu 
 static wchar_t      g_sessionReplay[MAX_PATH];   // powtórka bieżącej sesji
 static int          g_lastTick = -1;
 static long long    g_cntDmg, g_cntDie;
+
+// ---------------------------------------------------------------- pomiar narzutu (PERF w dzienniku co 10 s)
+// Liczony jest tylko czas NASZEGO kodu w hookach (bez czasu oryginalnych funkcji gry) – w wątku gry.
+static volatile LONG64 g_perfTicks, g_perfCalls, g_perfMax, g_selTicks;
+
+static inline LONG64 Qpc()
+{
+    LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart;
+}
+
+static inline void PerfAdd(LONG64 dt)
+{
+    InterlockedAdd64(&g_perfTicks, dt);
+    InterlockedIncrement64(&g_perfCalls);
+    if (dt > g_perfMax) g_perfMax = dt;  // przybliżone maksimum (hooki działają praktycznie w jednym wątku)
+}
 static std::unordered_map<unsigned long, unsigned long>* g_entSquad; // id encji -> ostatni zapisany oddział
 static std::unordered_set<unsigned long>* g_players;
 static std::unordered_set<int>* g_weapons;
@@ -342,6 +358,7 @@ static void LogSourceOnce(void* r8, int wid, const char* wname, const Ent& a)
 static void hkSetHealth(void* self, float value)
 {
     if (g_armed) {
+        LONG64 t0 = Qpc();
         float old = ReadHealth(self);
         if (t_app) {
             if (value < old) t_app->hpLoss += old - value;
@@ -356,6 +373,7 @@ static void hkSetHealth(void* self, float value)
             Out("{\"t\":\"hp\",\"tick\":%d,\"v\":%lu,\"vs\":%lu,\"hp\":%.3f,\"src\":\"%s\"}\n", tick, v.id, v.sq, old - value, src);
             ReleaseSRWLockExclusive(&g_lock);
         }
+        PerfAdd(Qpc() - t0);
     }
     oSetHealth(self, value);
 }
@@ -376,9 +394,11 @@ static void EmitDeath(uintptr_t ent, const Ent* by)
 static void hkDeath(void* self, uint64_t flag)
 {
     if (g_armed) {
+        LONG64 t0 = Qpc();
         uintptr_t ent = EntityFromHealthExt(self);
         if (t_app) { if (t_app->nDeaths < 4) t_app->deaths[t_app->nDeaths++] = ent; }
         else if (ent) EmitDeath(ent, nullptr);
+        PerfAdd(Qpc() - t0);
     }
     oDeath(self, flag);
 }
@@ -386,13 +406,19 @@ static void hkDeath(void* self, uint64_t flag)
 static float hkApplyDamage(void* victim, void* attacker, void* r8, void* r9, float f5, uint64_t b6)
 {
     if (!g_armed) return oApplyDamage(victim, attacker, r8, r9, f5, b6);
+    LONG64 t0 = Qpc();
     // Encje odczytujemy PRZED oryginałem: zabity model jest w jego trakcie usuwany z oddziału (sq=0).
     Ent v, a; QueryEnt(victim, &v); QueryEnt(attacker, &a);
     AppCtx ctx = { 0.f, 0, {}, t_app };
     t_app = &ctx;
+    LONG64 tA = Qpc();
     float res = oApplyDamage(victim, attacker, r8, r9, f5, b6);
+    LONG64 tB = Qpc();
     t_app = ctx.prev;
-    if (res <= 0.f && ctx.hpLoss <= 0.f && ctx.nDeaths == 0) return res; // szum (zerowe wywołania)
+    if (res <= 0.f && ctx.hpLoss <= 0.f && ctx.nDeaths == 0) {  // szum (zerowe wywołania)
+        PerfAdd((tA - t0) + (Qpc() - tB));
+        return res;
+    }
 
     int wid; char wname[160]; bool melee;
     WeaponInfoOf(r9, &wid, wname, sizeof(wname), &melee);
@@ -431,6 +457,7 @@ static float hkApplyDamage(void* victim, void* attacker, void* r8, void* r9, flo
 
     // zgony innych encji wywołane tym trafieniem (np. odbicie obrażeń) – rzadkie
     for (int i = 0; i < ctx.nDeaths; ++i) if (ctx.deaths[i] && ctx.deaths[i] != (uintptr_t)victim) EmitDeath(ctx.deaths[i], &a);
+    PerfAdd((tA - t0) + (Qpc() - tB));  // bez czasu oryginału (w nim są nasze SetHealth/Death – liczone osobno)
     return res;
 }
 
@@ -728,7 +755,24 @@ static DWORD WINAPI InitThread(LPVOID)
     for (unsigned iter = 0;; ++iter) {
         // co 0,1 s zaznaczenie gracza (v1.2; było 0,2 s); co 1 s zegar i zrzut buforów
         DWORD w = WaitForSingleObject(g_armEvent, 100);
-        if (w == WAIT_TIMEOUT && g_armed && selection) PollSelection(GameTicks());
+        if (w == WAIT_TIMEOUT && g_armed && selection) {
+            LONG64 t0 = Qpc();
+            PollSelection(GameTicks());
+            InterlockedAdd64(&g_selTicks, Qpc() - t0);
+        }
+        if (w == WAIT_TIMEOUT && iter % 100 == 0 && g_armed) {  // co 10 s: narzut w ms na sekundę czasu rzeczywistego
+            static LONG64 lastT, lastTicks, lastCalls, lastSel;
+            LARGE_INTEGER f; QueryPerformanceFrequency(&f);
+            LONG64 now = Qpc(), ticks = g_perfTicks, calls = g_perfCalls, sel = g_selTicks;
+            if (lastT) {
+                double sec = double(now - lastT) / f.QuadPart;
+                Log("PERF hooki: %.3f ms/s (%.0f wywolan/s, max %.1f us) | zaznaczenie: %.3f ms/s\n",
+                    (ticks - lastTicks) * 1000.0 / f.QuadPart / sec, (calls - lastCalls) / sec,
+                    g_perfMax * 1e6 / f.QuadPart, (sel - lastSel) * 1000.0 / f.QuadPart / sec);
+                g_perfMax = 0;
+            }
+            lastT = now; lastTicks = ticks; lastCalls = calls; lastSel = sel;
+        }
         if (w == WAIT_TIMEOUT && iter % 10 != 0) continue;
         LONG want = g_armed;
         if (want != applied) {

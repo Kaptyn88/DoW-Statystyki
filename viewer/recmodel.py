@@ -7,6 +7,7 @@ import bisect
 import collections
 import json
 import os
+import time
 
 TPS_DEFAULT = 8
 from i18n import lang, t
@@ -28,6 +29,7 @@ class Catalog:
     def reload(self):
         """Wczytuje (ponownie) catalog.json – np. po zbudowaniu go przy pierwszym uruchomieniu paczki."""
         path = self.path
+        self._exists = {}
         try:
             with open(path, encoding='utf-8') as f:
                 self.c = json.load(f)
@@ -52,7 +54,10 @@ class Catalog:
             return None
         size = min(ICON_SIZES, key=lambda s: abs(s - size))
         path = os.path.join(ICONS_DIR, f'{stem}_{size}.png')
-        return path if os.path.exists(path) else None
+        exists = self._exists.get(path)
+        if exists is None:  # sprawdzenie dysku raz na plik (wołane dla każdego wiersza co odświeżenie)
+            exists = self._exists[path] = os.path.exists(path)
+        return path if exists else None
 
     def squad_icon(self, bp):
         """Ikona oddziału; gdy oddział nie ma własnej (np. Oddział Dowodzenia Gwardii) – ikona jego pierwszej jednostki."""
@@ -147,6 +152,9 @@ class Recording:
         self.events = []           # (tick, typ, rekord) w kolejności pliku
         self.ticks = []            # ticki zdarzeń (do bisect)
         self.max_tick = 0
+        self._last_growth = time.monotonic()  # kiedy plik ostatnio urósł (statystyki na żywo)
+        self._live = _Acc(self)                # statystyki całego meczu liczone przyrostowo
+        self._labels, self._label_state = {}, None
         self.poll()
 
     # -- wczytywanie
@@ -165,6 +173,7 @@ class Recording:
             f.seek(self._pos)
             chunk = f.read()
         self._pos += len(chunk)
+        self._last_growth = time.monotonic()
         text = self._partial + chunk.decode('utf-8', errors='replace')
         lines = text.split('\n')
         self._partial = lines.pop()  # ostatnia (niepełna) linia czeka na dopisanie
@@ -255,7 +264,17 @@ class Recording:
         return ('unnamed', '')
 
     def unit_label(self, k):
-        """Nazwa oddziału z numerem kolejnym wśród oddziałów tego samego typu u gracza (np. 'Ork shoota boy #2')."""
+        """Nazwa oddziału z numerem kolejnym wśród oddziałów tego samego typu u gracza (np. 'Ork shoota boy #2').
+        Zapamiętywana – numeracja zmienia się tylko, gdy przybywa oddziałów (albo po przeładowaniu katalogu)."""
+        state = (len(self.units), id(CATALOG.c))
+        if self._label_state != state:
+            self._label_state, self._labels = state, {}
+        label = self._labels.get(k)
+        if label is None:
+            label = self._labels[k] = self._unit_label(k)
+        return label
+
+    def _unit_label(self, k):
         u = self.units.get(k)
         if not u:
             return f'{k[0]}{k[1]}'
@@ -268,23 +287,57 @@ class Recording:
 
     # -- statystyki
     def stats(self, upto_tick=None, from_tick=None):
-        """Statystyki oddziałów dla zdarzeń z from_tick < tick <= upto_tick (None = bez ograniczenia)."""
+        """Statystyki oddziałów dla zdarzeń z from_tick < tick <= upto_tick (None = bez ograniczenia).
+
+        Cały mecz do bieżącej chwili (podgląd "Na żywo", nakładka) liczony jest PRZYROSTOWO – doliczane są tylko nowe
+        zdarzenia, więc koszt nie rośnie z długością meczu. Inne zakresy (suwak, ostatnie 60 s) liczone są od zera."""
+        if from_tick is None and (upto_tick is None or upto_tick >= self.max_tick):
+            self._advance_live()
+            acc = self._live
+            return Stats(self, acc.S, acc.weap, acc.victims, acc.attackers, acc.timeline, upto_tick)
         end = len(self.events) if upto_tick is None else bisect.bisect_right(self.ticks, upto_tick)
         start = 0 if from_tick is None else bisect.bisect_right(self.ticks, from_tick)
-        S = collections.defaultdict(collections.Counter)
-        weap = collections.defaultdict(collections.Counter)      # oddział -> broń -> zadane
-        victims = collections.defaultdict(collections.Counter)   # oddział -> oddział-ofiara -> zadane
-        attackers = collections.defaultdict(collections.Counter) # oddział -> oddział-atakujący -> otrzymane
-        timeline = collections.defaultdict(collections.Counter)  # oddział -> przedział 30 s -> zadane
-        bucket = 30 * self.tps
+        acc = _Acc(self)
+        acc.feed(self.events[start:end])
+        return Stats(self, acc.S, acc.weap, acc.victims, acc.attackers, acc.timeline, upto_tick)
+
+    def _advance_live(self):
+        """Dolicza do statystyk "na żywo" zdarzenia z ticków starszych niż najnowszy. Zdarzenia z najnowszego ticku
+        czekają, bo rejestrator zapisuje np. trafienia wybuchu generatora PRZED rekordem jego zniszczenia (ten sam tick)
+        – liczone za wcześnie dostałyby zły podpis. Gdy plik nie rośnie od 1,5 s (pauza/koniec), liczy wszystko."""
+        stale = time.monotonic() - self._last_growth > 1.5
+        limit = len(self.events) if stale else bisect.bisect_left(self.ticks, self.max_tick)
+        if limit > self._live.n:
+            self._live.feed(self.events[self._live.n:limit])
+
+
+class _Acc:
+    """Akumulator statystyk: zasilany zdarzeniami w kolejności pliku (całość albo przyrostowo)."""
+
+    DOT_WINDOW_S, DOT_MAX = 15, 25.0
+
+    def __init__(self, rec):
+        self.rec = rec
+        self.n = 0                                                    # ile zdarzeń przetworzono (tryb przyrostowy)
+        self.S = collections.defaultdict(collections.Counter)
+        self.weap = collections.defaultdict(collections.Counter)      # oddział -> broń -> zadane
+        self.victims = collections.defaultdict(collections.Counter)   # oddział -> oddział-ofiara -> zadane
+        self.attackers = collections.defaultdict(collections.Counter) # oddział -> oddział-atakujący -> otrzymane
+        self.timeline = collections.defaultdict(collections.Counter)  # oddział -> przedział 30 s -> zadane
         # Obrażenia w czasie (faza _dot) gra nakłada jako modyfikator zdrowia – spadki HP idą poza ApplyDamage, bez
         # sprawcy (rekord 'hp'). HEURYSTYKA (powtórka DE 2026-10-17): małe spadki HP ofiary do DOT_WINDOW po trafieniu
         # zdolnością z fazą _dot przypisujemy tej zdolności i jej sprawcy.
-        dot_window, dot_max = 15 * self.tps, 25.0
-        last_dot_hit = {}                                         # ofiara -> (tick, oddział sprawcy, zdolność)
-        for tick, t, r in self.events[start:end]:
+        self.last_dot_hit = {}                                        # ofiara -> (tick, oddział sprawcy, zdolność)
+
+    def feed(self, events):
+        rec = self.rec
+        S, weap, victims, attackers, timeline = self.S, self.weap, self.victims, self.attackers, self.timeline
+        last_dot_hit = self.last_dot_hit
+        bucket = 30 * rec.tps
+        dot_window = self.DOT_WINDOW_S * rec.tps
+        for tick, t, r in events:
             if t == 'dmg':
-                ak, vk = r.get('_ak') or self._key(r['a'], r['as']), self._key(r['v'], r['vs'])
+                ak, vk = r.get('_ak') or rec._key(r['a'], r['as']), rec._key(r['v'], r['vs'])
                 hp = r['hp']
                 if r['ff']:
                     S[ak]['ff'] += hp
@@ -294,7 +347,7 @@ class Recording:
                     S[ak]['kills'] += r['k']
                     S[ak]['hits'] += 1
                     # bez WeaponInfo: rozróżniamy po nazwie zdolności albo ścieżce kodu (src)
-                    wkey = r['w'] if r['w'] >= 0 else self._source_key(r)
+                    wkey = r['w'] if r['w'] >= 0 else rec._source_key(r)
                     if r.get('_ak') and wkey[0] == 'special':  # w wierszu mocy gracza nie ma broni wręcz
                         wkey = ('unnamed', '')
                     weap[ak][wkey] += hp
@@ -306,14 +359,14 @@ class Recording:
                 S[vk]['taken'] += hp
                 S[vk]['lost'] += r['k']
             elif t == 'die':
-                S[self._key(r['v'], r['vs'])]['lost'] += 1
+                S[rec._key(r['v'], r['vs'])]['lost'] += 1
                 dot = last_dot_hit.get(r['v'])
                 if dot and tick - dot[0] <= dot_window:
                     S[dot[1]]['kills'] += 1                       # zgon w trakcie obrażeń w czasie
             elif t == 'hp':
-                vk = self._key(r['v'], r['vs'])
+                vk = rec._key(r['v'], r['vs'])
                 dot = last_dot_hit.get(r['v'])
-                if dot and tick - dot[0] <= dot_window and r['hp'] <= dot_max:
+                if dot and tick - dot[0] <= dot_window and r['hp'] <= self.DOT_MAX:
                     ak = dot[1]
                     S[ak]['dealt'] += r['hp']
                     weap[ak][('dot', dot[2])] += r['hp']
@@ -325,7 +378,7 @@ class Recording:
                     # reszta: stawianie budynków (start z 20% HP), samoistna utrata zdrowia (jednostki tymczasowe,
                     # wygasanie) – nie są to obrażenia zadane przez kogokolwiek
                     S[vk]['hp_other'] += r['hp']
-        return Stats(self, S, weap, victims, attackers, timeline, upto_tick)
+        self.n += len(events)
 
 
 class Stats:

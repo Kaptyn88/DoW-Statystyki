@@ -65,6 +65,7 @@ class Viewer(tk.Tk):
         self.sort_col, self.sort_desc = 'dealt', True
         self.selected = None      # klucz zaznaczonego oddziału
         self._row_keys = {}       # iid wiersza -> klucz oddziału
+        self._row_spec = {}       # iid wiersza -> ostatnio wpisane wartości (aktualizacja tylko przy zmianie)
         self.ov_settings = OverlaySettings.load()
         self.overlay = None
         self.ov_window = None
@@ -173,6 +174,8 @@ class Viewer(tk.Tk):
             self.file_label.configure(text=t('no_recordings'))
             return
         self.rec = Recording(path)
+        self.tree.delete(*self.tree.get_children())
+        self._row_keys, self._row_spec = {}, {}
         self.selected = None
         self._sel_seq = 0
         self.file_label.configure(text=os.path.basename(path))
@@ -347,22 +350,37 @@ class Viewer(tk.Tk):
                     'dealt': c['dealt'], 'kills': c['kills'], 'taken': c['taken'], 'lost': c['lost'], 'ff': c['ff']}[col]
 
         rows = sorted(ranking, key=lambda k: val(k, self.sort_col), reverse=self.sort_desc)
-        self.tree.delete(*self.tree.get_children())
-        self._row_keys.clear()
         for p, color in pcolor.items():
             self.tree.tag_configure(f'p{p}', foreground=color)
-        for k in rows:
+        # Aktualizacja w miejscu: istniejące wiersze dostają nowe wartości tylko gdy się zmieniły i są przesuwane
+        # na nową pozycję; nowe oddziały są wstawiane, zniknięte usuwane (zamiast kasowania całej tabeli co sekundę).
+        place = {k: i for i, k in enumerate(ranking)}
+        old = {k: iid for iid, k in self._row_keys.items()}
+        self._row_keys = {}
+        for idx, k in enumerate(rows):
             c = st.S[k]
             p = rec.units.get(k, {}).get('pid')
             img = iconcache.photo(st.unit_icon(k, 20))
-            iid = self.tree.insert('', 'end', tags=(f'p{p}',), image=img or '', values=(
-                ranking.index(k) + 1, rec.unit_label(k), rec.players.get(p, '?'), f"{c['dealt']:.0f}",
-                f"{100 * c['dealt'] / total:.1f}%", c['kills'], f"{c['taken']:.0f}", c['lost'],
-                f"{c['ff']:.0f}" if c['ff'] else ''))
+            vals = (place[k] + 1, rec.unit_label(k), rec.players.get(p, '?'), f"{c['dealt']:.0f}",
+                    f"{100 * c['dealt'] / total:.1f}%", c['kills'], f"{c['taken']:.0f}", c['lost'],
+                    f"{c['ff']:.0f}" if c['ff'] else '')
+            spec = (vals, f'p{p}', str(img or ''))
+            iid = old.pop(k, None)
+            if iid is None:
+                iid = self.tree.insert('', idx, tags=(spec[1],), image=img or '', values=vals)
+            else:
+                if self._row_spec.get(iid) != spec:
+                    self.tree.item(iid, tags=(spec[1],), image=img or '', values=vals)
+                if self.tree.index(iid) != idx:
+                    self.tree.move(iid, '', idx)
+            self._row_spec[iid] = spec
             self._row_keys[iid] = k
-            if k == self.selected:
+            if k == self.selected and self.tree.selection() != (iid,):
                 self.tree.selection_set(iid)
                 self.tree.see(iid)
+        for iid in old.values():
+            self.tree.delete(iid)
+            self._row_spec.pop(iid, None)
         self.status.configure(text=t('status_line', replay=rec.meta.get('replay', '?'), n=len(rec.events),
                                      players=', '.join(rec.players.values())))
         self._show_detail()
