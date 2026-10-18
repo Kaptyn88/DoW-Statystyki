@@ -175,10 +175,12 @@ def _build(args):
     print('warstwy:', [n for n, _ in vfs.archives], '· plików attrib:', len(vfs.index))
     pl = load_ucs(os.path.join(args.game, r'Engine\Locale\Polish\Engine.ucs'))
     en = load_ucs(os.path.join(args.game, r'Engine\Locale\English\Engine.ucs'))
+    ru = load_ucs(os.path.join(args.game, r'Engine\Locale\Russian\Engine.ucs'))
     dic = Dictionary(KEYS)
 
     def names(tid):
-        return {'pl': pl.get(tid, ''), 'en': en.get(tid, '')} if tid else {'pl': '', 'en': ''}
+        return ({'pl': pl.get(tid, ''), 'en': en.get(tid, ''), 'ru': ru.get(tid, '')} if tid
+                else {'pl': '', 'en': '', 'ru': ''})
 
     def load(prefix):
         out = {}
@@ -192,8 +194,8 @@ def _build(args):
                 print('  pominięto', p, e, file=sys.stderr)
         return out
 
-    cat = {'abilities': {}, 'weapons': {}, 'units': {}, 'squads': {}, 'source': {
-        'layers': [n for n, _ in vfs.archives], 'ucs': 'Engine/Locale/{Polish,English}/Engine.ucs'}}
+    cat = {'version': 2, 'abilities': {}, 'weapons': {}, 'units': {}, 'squads': {}, 'source': {
+        'layers': [n for n, _ in vfs.archives], 'ucs': 'Engine/Locale/{Polish,English,Russian}/Engine.ucs'}}
 
     for p, (layer, t) in load('attrib\\abilities\\').items():
         name = os.path.splitext(os.path.basename(p))[0]
@@ -266,7 +268,7 @@ def _build(args):
         r = root(name)
         if r != name:
             a['root'] = r
-            for key in ('pl', 'en'):
+            for key in ('pl', 'en', 'ru'):
                 if not a[key]:
                     a[key] = abil[r][key]
             a['race'] = a['race'] or abil[r]['race']

@@ -9,12 +9,15 @@ import json
 import os
 
 TPS_DEFAULT = 8
+from i18n import lang, t
 from paths import CATALOG_PATH
+
+CATALOG_VERSION = 2  # 2: nazwy pl/en/ru; starszy katalog podgląd buduje od nowa
 
 
 class Catalog:
-    """Nazwy z danych gry (catalog/build_catalog.py): oddziały, jednostki, bronie, zdolności – po polsku,
-    z angielskim jako zapasem. Bez pliku katalogu wszystkie metody zwracają None (zostają nazwy techniczne)."""
+    """Nazwy z danych gry (catalog/build_catalog.py): oddziały, jednostki, bronie, zdolności – w języku interfejsu
+    (pl/en/ru), z angielskim i polskim jako zapasem. Bez katalogu metody zwracają None (zostają nazwy techniczne)."""
 
     def __init__(self, path=CATALOG_PATH):
         self.path = path
@@ -29,9 +32,16 @@ class Catalog:
         except (OSError, ValueError):
             self.c = {}
 
+    def outdated(self):
+        return self.c.get('version', 1) < CATALOG_VERSION
+
+    @staticmethod
+    def _pick(v):
+        """Nazwa w języku interfejsu; zapas: angielska, potem polska."""
+        return (v.get(lang()) or v.get('en') or v.get('pl') or None) if v else None
+
     def _name(self, kind, key):
-        v = self.c.get(kind, {}).get((key or '').lower())
-        return (v.get('pl') or v.get('en')) if v else None
+        return self._pick(self.c.get(kind, {}).get((key or '').lower()))
 
     def is_structure(self, bp):
         v = self.c.get('units', {}).get((bp or '').lower())
@@ -62,7 +72,7 @@ class Catalog:
         if not v:
             return None
         root = self.c['abilities'].get(v.get('root', ''), {})
-        return v.get('pl') or v.get('en') or root.get('pl') or root.get('en') or None
+        return self._pick(v) or self._pick(root)
 
 
 CATALOG = Catalog()
@@ -217,7 +227,7 @@ class Recording:
             return f'{k[0]}{k[1]}'
         if k[0] == 'powers':
             dark_eldar = any(b.startswith('dark_eldar') for e, b in self.ent_bp.items() if self.ent_pid.get(e) == k[1])
-            return 'Moce duszy' if dark_eldar else 'Moce gracza'
+            return t('powers_soul') if dark_eldar else t('powers_player')
         same = sorted(kk for kk, uu in self.units.items() if uu['bp'] == u['bp'] and uu['pid'] == u['pid'])
         name = CATALOG.squad(u['bp']) or pretty_bp(u['bp'])
         return f'{name} #{same.index(k) + 1}' if len(same) > 1 else name
@@ -315,22 +325,22 @@ class Stats:
             if kind == 'special':
                 if name is not None and name >= 0 and name in self.rec.weapons:
                     wn = self.rec.weapons[name][0]
-                    return f'atak specjalny: {CATALOG.weapon(wn) or wn}'
-                return 'atak specjalny (wręcz)'
+                    return t('src_special_w', w=CATALOG.weapon(wn) or wn)
+                return t('src_special')
             if kind == 'unnamed':
-                return 'zdolność / atak specjalny (bez nazwy)'
+                return t('src_unnamed')
             if kind == 'dot':
-                return f'{CATALOG.ability(name) or name} (obrażenia w czasie)'
+                return t('src_dot', a=CATALOG.ability(name) or name)
             if kind == 'explosion':
-                return 'wybuch przy zniszczeniu'
+                return t('src_explosion')
             if kind == 'structure':
-                return 'efekt budynku / mina'
+                return t('src_structure')
             if folder.startswith('weapon'):
-                return f'{CATALOG.weapon(name) or name} (atak specjalny)'
+                return t('src_weapon_special', w=CATALOG.weapon(name) or name)
             if folder.startswith('abilit') or not folder:
-                return f'zdolność: {CATALOG.ability(name) or name}'
+                return t('src_ability', a=CATALOG.ability(name) or name)
             return f'{folder}: {name}'
         if wid == -1:
-            return 'bez broni (zdolność / atak specjalny)'
-        name, melee = self.rec.weapons.get(wid, (f'broń {wid}', False))
-        return (CATALOG.weapon(name) or name) + (' (wręcz)' if melee else '')
+            return t('src_no_weapon')
+        name, melee = self.rec.weapons.get(wid, (t('weapon_n', n=wid), False))
+        return (CATALOG.weapon(name) or name) + (t('melee_suffix') if melee else '')

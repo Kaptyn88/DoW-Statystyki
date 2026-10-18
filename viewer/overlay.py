@@ -12,14 +12,21 @@ from dataclasses import asdict, dataclass, fields
 from tkinter import ttk
 
 import paths
+from i18n import t
 from recmodel import Recording
 
 SETTINGS_PATH = paths.SETTINGS_PATH
 # jaśniejsze odcienie kolorów graczy – czytelne na ciemnym tle nakładki
 OVERLAY_COLORS = ['#7fb0ff', '#ff8a6b', '#6fd68f', '#f2c14e', '#c38df0', '#4fd1c5', '#ff6b81', '#c0c6cc']
-MODE_ALL, MODE_EACH = 'Wszyscy razem', 'Każdy gracz osobno'
-WINDOWS = {'Cały mecz': 0, 'Ostatnie 60 s': 60, 'Ostatnie 3 min': 180}
-SORTS = {'Zadane obrażenia': 'dealt', 'Zabite modele': 'kills'}
+# tryb graczy zapisywany kodem ('all' / 'each') albo nazwą gracza; dawne polskie etykiety mapujemy przy wczytaniu
+MODE_ALL, MODE_EACH = 'all', 'each'
+LEGACY_MODES = {'Wszyscy razem': MODE_ALL, 'Każdy gracz osobno': MODE_EACH}
+WINDOW_VALUES = (0, 60, 180)        # sekundy; 0 = cały mecz
+SORT_VALUES = ('dealt', 'kills')
+
+
+def window_label(sec):
+    return t(f'win_{sec}')
 
 
 @dataclass
@@ -47,14 +54,23 @@ class OverlaySettings:
             with open(SETTINGS_PATH, encoding='utf-8') as f:
                 data = json.load(f).get('overlay', {})
             known = {f.name for f in fields(cls)}
-            return cls(**{k: v for k, v in data.items() if k in known})
+            s = cls(**{k: v for k, v in data.items() if k in known})
+            s.mode = LEGACY_MODES.get(s.mode, s.mode)
+            return s
         except (OSError, ValueError, TypeError):
             return cls()
 
     def save(self):
+        """Zapisuje sekcję 'overlay', zachowując resztę settings.json (np. język)."""
+        try:
+            with open(SETTINGS_PATH, encoding='utf-8') as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            data = {}
+        data['overlay'] = asdict(self)
         try:
             with open(SETTINGS_PATH, 'w', encoding='utf-8') as f:
-                json.dump({'overlay': asdict(self)}, f, ensure_ascii=False, indent=2)
+                json.dump(data, f, ensure_ascii=False, indent=2)
         except OSError:
             pass
 
@@ -149,21 +165,23 @@ class Overlay(tk.Toplevel):
             return w
 
         if rec is None or (not rec.events and not rec.selection):
-            label('DoW: brak danych – czekam na powtórkę', 0, 0, fg='#9aa3ab', f=small)
+            label(t('ov_wait'), 0, 0, fg='#9aa3ab', f=small)
             if not s.locked:
-                label('(przeciągnij, aby ustawić; zablokuj w ustawieniach)', 1, 0, fg='#6b747c', f=small)
+                label(t('ov_drag'), 1, 0, fg='#6b747c', f=small)
             return
 
         tick = rec.max_tick
         from_tick = tick - s.window_s * rec.tps if s.window_s else None
         st = rec.stats(tick, from_tick)
         pcolor = {p: OVERLAY_COLORS[i % len(OVERLAY_COLORS)] for i, p in enumerate(sorted(rec.players))}
-        cols = [(k, h) for k, h, on in (('dealt', 'Obraż.', s.show_dealt), ('share', '%', s.show_share),
-                                         ('kills', 'Zab.', s.show_kills), ('lost', 'Strac.', s.show_lost)) if on]
+        cols = [(k, h) for k, h, on in (('dealt', t('ov_col_dealt'), s.show_dealt), ('share', '%', s.show_share),
+                                         ('kills', t('ov_col_kills'), s.show_kills),
+                                         ('lost', t('ov_col_lost'), s.show_lost)) if on]
         row = 0
         if s.show_header:
-            win = next((n for n, v in WINDOWS.items() if v == s.window_s), '')
-            label(f"{fmt_time(tick, rec.tps)}  ·  {win.lower()}  ·  wg {'zabójstw' if s.sort_by == 'kills' else 'obrażeń'}",
+            win = window_label(s.window_s) if s.window_s in WINDOW_VALUES else ''
+            by = t('ov_by_kills') if s.sort_by == 'kills' else t('ov_by_dmg')
+            label(f"{fmt_time(tick, rec.tps)}  ·  {win}  ·  {by}",
                   row, 0, fg='#9aa3ab', f=small, columnspan=1 + len(cols))
             row += 1
 
@@ -215,19 +233,22 @@ class Overlay(tk.Toplevel):
                 more = f'  (+{len(sel) - 1})' if len(sel) > 1 else ''
                 label(f'▶ {rec.unit_label(k)}{more}', row, 0, fg=pcolor.get(upid, '#e6e9ec'), f=bold, columnspan=span)
                 row += 1
-                label(f"obrażenia {c['dealt']:.0f}  ·  zabite {c['kills']}  ·  stracone {c['lost']}", row, 0,
-                      columnspan=span)
+                label(t('ov_sel_line', d=f"{c['dealt']:.0f}", k=c['kills'], l=c['lost']), row, 0, columnspan=span)
                 row += 1
 
 
 class OverlaySettingsWindow(tk.Toplevel):
-    """Okno ustawień nakładki; każda zmiana od razu odświeża nakładkę i zapisuje settings.json."""
+    """Okno ustawień nakładki; każda zmiana od razu odświeża nakładkę i zapisuje settings.json.
+    Listy pokazują etykiety w języku interfejsu, a w ustawieniach zapisywane są kody (sort_by, mode, window_s)."""
 
     def __init__(self, master, settings: OverlaySettings, players, on_change):
         super().__init__(master)
-        self.title('Nakładka – ustawienia')
+        self.title(t('set_title'))
         self.resizable(False, False)
         self.s, self.on_change = settings, on_change
+        self.sorts = {t('sort_dealt'): 'dealt', t('sort_kills'): 'kills'}
+        self.windows = {window_label(sec).capitalize(): sec for sec in WINDOW_VALUES}
+        self.modes = {t('mode_all'): MODE_ALL, t('mode_each'): MODE_EACH}
         f = ttk.Frame(self, padding=12)
         f.pack(fill='both', expand=True)
         self.v = {}
@@ -239,59 +260,60 @@ class OverlaySettingsWindow(tk.Toplevel):
             widget.grid(row=r, column=1, sticky='we', pady=3)
             r += 1
 
+        def label_of(mapping, value, default):
+            return next((k for k, v in mapping.items() if v == value), default)
+
         self.v['enabled'] = tk.BooleanVar(value=settings.enabled)
-        ttk.Checkbutton(f, text='Pokaż nakładkę', variable=self.v['enabled'], command=self._apply).grid(
+        ttk.Checkbutton(f, text=t('set_show'), variable=self.v['enabled'], command=self._apply).grid(
             row=r, column=0, columnspan=2, sticky='w', pady=(0, 6))
         r += 1
         self.v['count'] = tk.IntVar(value=settings.count)
-        row('Liczba oddziałów', ttk.Spinbox(f, from_=2, to=5, width=5, textvariable=self.v['count'], command=self._apply,
-                                           state='readonly'))
-        self.v['sort_by'] = tk.StringVar(value=next(n for n, v in SORTS.items() if v == settings.sort_by))
-        row('Sortuj wg', self._combo(f, self.v['sort_by'], list(SORTS)))
-        self.v['mode'] = tk.StringVar(value=settings.mode)
-        self.mode_box = self._combo(f, self.v['mode'], [MODE_ALL, MODE_EACH] + list(players))
-        row('Gracze', self.mode_box)
-        self.v['window_s'] = tk.StringVar(value=next((n for n, v in WINDOWS.items() if v == settings.window_s), 'Cały mecz'))
-        row('Zakres czasu', self._combo(f, self.v['window_s'], list(WINDOWS)))
+        row(t('set_count'), ttk.Spinbox(f, from_=2, to=5, width=5, textvariable=self.v['count'], command=self._apply,
+                                        state='readonly'))
+        self.v['sort_by'] = tk.StringVar(value=label_of(self.sorts, settings.sort_by, t('sort_dealt')))
+        row(t('set_sort'), self._combo(f, self.v['sort_by'], list(self.sorts)))
+        self.v['mode'] = tk.StringVar(value=label_of(self.modes, settings.mode, settings.mode))
+        self.mode_box = self._combo(f, self.v['mode'], list(self.modes) + list(players))
+        row(t('set_players'), self.mode_box)
+        self.v['window_s'] = tk.StringVar(value=label_of(self.windows, settings.window_s, list(self.windows)[0]))
+        row(t('set_range'), self._combo(f, self.v['window_s'], list(self.windows)))
 
-        ttk.Label(f, text='Kolumny').grid(row=r, column=0, sticky='nw', pady=3)
+        ttk.Label(f, text=t('set_columns')).grid(row=r, column=0, sticky='nw', pady=3)
         cf = ttk.Frame(f)
         cf.grid(row=r, column=1, sticky='w')
         r += 1
-        for i, (key, text) in enumerate([('show_dealt', 'zadane obrażenia'), ('show_kills', 'zabite modele'),
-                                         ('show_lost', 'stracone modele'), ('show_share', 'udział %'),
-                                         ('show_header', 'nagłówek z czasem'),
-                                         ('show_selected', 'zaznaczony oddział')]):
+        for i, (key, text) in enumerate([('show_dealt', t('chk_dealt')), ('show_kills', t('chk_kills')),
+                                         ('show_lost', t('chk_lost')), ('show_share', t('chk_share')),
+                                         ('show_header', t('chk_header')), ('show_selected', t('chk_selected'))]):
             self.v[key] = tk.BooleanVar(value=getattr(settings, key))
             ttk.Checkbutton(cf, text=text, variable=self.v[key], command=self._apply).grid(row=i // 2, column=i % 2,
                                                                                            sticky='w', padx=(0, 10))
         self.v['opacity'] = tk.DoubleVar(value=settings.opacity)
-        row('Przezroczystość', ttk.Scale(f, from_=0.3, to=1.0, variable=self.v['opacity'], command=lambda _: self._apply()))
+        row(t('set_opacity'), ttk.Scale(f, from_=0.3, to=1.0, variable=self.v['opacity'], command=lambda _: self._apply()))
         self.v['font_size'] = tk.IntVar(value=settings.font_size)
-        row('Wielkość tekstu', ttk.Spinbox(f, from_=8, to=20, width=5, textvariable=self.v['font_size'],
-                                          command=self._apply, state='readonly'))
+        row(t('set_font'), ttk.Spinbox(f, from_=8, to=20, width=5, textvariable=self.v['font_size'],
+                                       command=self._apply, state='readonly'))
         self.v['locked'] = tk.BooleanVar(value=settings.locked)
-        ttk.Checkbutton(f, text='Zablokuj nakładkę (kliknięcia przechodzą do gry)', variable=self.v['locked'],
+        ttk.Checkbutton(f, text=t('set_lock'), variable=self.v['locked'],
                         command=self._apply).grid(row=r, column=0, columnspan=2, sticky='w', pady=(8, 0))
         r += 1
-        ttk.Label(f, text='Odblokowaną nakładkę przesuwasz myszą.', foreground='#666').grid(
-            row=r, column=0, columnspan=2, sticky='w')
+        ttk.Label(f, text=t('set_drag_hint'), foreground='#666').grid(row=r, column=0, columnspan=2, sticky='w')
 
     def _combo(self, parent, var, values):
-        c = ttk.Combobox(parent, textvariable=var, values=values, state='readonly', width=24)
+        c = ttk.Combobox(parent, textvariable=var, values=values, state='readonly', width=26)
         c.bind('<<ComboboxSelected>>', lambda e: self._apply())
         return c
 
     def set_players(self, players):
-        self.mode_box.configure(values=[MODE_ALL, MODE_EACH] + list(players))
+        self.mode_box.configure(values=list(self.modes) + list(players))
 
     def _apply(self):
         s, v = self.s, self.v
         s.enabled = v['enabled'].get()
         s.count = int(v['count'].get())
-        s.sort_by = SORTS[v['sort_by'].get()]
-        s.mode = v['mode'].get()
-        s.window_s = WINDOWS[v['window_s'].get()]
+        s.sort_by = self.sorts.get(v['sort_by'].get(), 'dealt')
+        s.mode = self.modes.get(v['mode'].get(), v['mode'].get())  # kod trybu albo nazwa gracza
+        s.window_s = self.windows.get(v['window_s'].get(), 0)
         for key in ('show_dealt', 'show_kills', 'show_lost', 'show_share', 'show_header', 'show_selected', 'locked'):
             setattr(s, key, v[key].get())
         s.opacity = round(float(v['opacity'].get()), 2)

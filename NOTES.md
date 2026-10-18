@@ -285,6 +285,18 @@ Przykładowa powtórka: Downloads\...W-NEC-L-ORK.rec (Necron vs Ork, mapa 2P_TIT
 - Nakładka: sekcja "▶ <oddział>" + "obrażenia · zabite · stracone" (cały mecz); przełącznik "zaznaczony oddział".
   "Miejsce w rankingu" usunięte na prośbę użytkownika (było niejasne).
 
+## Języki PL / EN / RU (v1.1, 2026-10-18)
+- viewer/i18n.py: teksty interfejsu (podgląd, nakładka, ustawienia, podpisy źródeł obrażeń) w 3 językach;
+  język w settings.json ("lang"), domyślnie język Windows (GetUserDefaultUILanguage: 0x15 pl, 0x19 ru, inny en).
+  Zmiana w podglądzie -> zapis i ponowne otwarcie okna (main() w pętli).
+- Nazwy z gry: catalog.json ma pl/en/ru z Engine\Locale\{Polish,English,Russian}\Engine.ucs (RU: 445/452 oddziałów);
+  katalog "version": 2 – podgląd sam przebudowuje starszy katalog (bez ru) przy starcie.
+- Nakładka: tryb graczy zapisywany kodem ('all'/'each' albo nick); stare polskie wartości mapowane przy wczytaniu.
+  OverlaySettings.save zachowuje inne klucze settings.json (lang).
+- Launcher: komunikaty pl/en/ru (język: <folder launchera>\..\settings.json albo Windows), UTF-16 w konsoli /
+  UTF-8 przy przekierowaniu; --check (gra znaleziona i nie działa) dla Start.bat, który nie ma już własnych tekstów.
+- Paczka: INSTRUKCJA.txt, INSTRUCTIONS_EN.txt, INSTRUKCIYA_RU.txt; make_package.py --no-build (bez MSVC).
+
 ## Docelowy projekt rejestratora (zrealizowany powyżej, notatka historyczna)
 - Hooki: ApplyDamage (wejście/wyjście), SetHealth (faktyczna strata HP), Death (zgon) + bezpiecznik .rec + World (czas).
 - Zdarzenie na każde skuteczne ApplyDamage: tick, atakujący (id, bp, squadId, owner), ofiara (to samo), broń

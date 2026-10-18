@@ -7,7 +7,7 @@ półprzezroczysta nakładka na grę. Po kliknięciu oddziału w grze widać jeg
 
 ![Nakładka podczas powtórki](viewer/screenshot_overlay_de.png)
 
-*Unofficial replay statistics tool for Dawn of War: Definitive Edition (Steam). Works only while watching replays.*
+Interfejs: **polski, angielski, rosyjski** · UI: **Polish, English, Russian** · Интерфейс: **польский, английский, русский**
 
 ## Pobranie i użycie (dla graczy)
 
@@ -16,6 +16,24 @@ półprzezroczysta nakładka na grę. Po kliknięciu oddziału w grze widać jeg
 3. Szczegóły: `INSTRUKCJA.txt` w paczce.
 
 Wymagania: Windows 10/11 64-bit, DoW: Definitive Edition ze Steam (wersja 2.10.3.1). Nic więcej nie trzeba instalować.
+
+## English
+
+Squad statistics for **Dawn of War: Definitive Edition** replays, similar to StarCraft II replay stats: damage dealt,
+models killed, damage taken and models lost for every squad, split by weapons, grenades and abilities (Dark Eldar
+soul powers as a separate row). A viewer window and a semi-transparent in-game overlay; selecting a squad in the
+game shows its numbers. Download the zip from **[Releases](../../releases)**, extract, run **`Start.bat`**, then
+in the game: Replays → choose a replay → Play. Details: `INSTRUCTIONS_EN.txt`. Works only while watching replays;
+game files are not modified.
+
+## Русский
+
+Статистика отрядов в реплеях **Dawn of War: Definitive Edition**, как в реплеях StarCraft II: нанесённый урон,
+убитые модели, полученный урон и потери каждого отряда с разбивкой по оружию, гранатам и способностям (силы душ
+Тёмных эльдар отдельной строкой). Окно просмотра и полупрозрачный оверлей поверх игры; при выборе отряда в игре
+показывается его статистика. Скачайте zip из **[Releases](../../releases)**, распакуйте, запустите **`Start.bat`**,
+затем в игре: Реплеи → выберите реплей → Воспроизвести. Подробности: `INSTRUKCIYA_RU.txt`. Работает только при
+просмотре реплеев; файлы игры не изменяются.
 
 ## Jak to działa
 

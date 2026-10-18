@@ -13,6 +13,8 @@
 #include <psapi.h>
 #include <tlhelp32.h>
 #include <stdio.h>
+#include <fcntl.h>
+#include <io.h>
 #include <string>
 #include <vector>
 
@@ -114,32 +116,72 @@ static std::wstring FindGameDir()
     return kDefaultGameDir;
 }
 
+// ---------------------------------------------------------------- język komunikatów (pl / en / ru)
+// Jak w podglądzie: "lang" z settings.json (paczka: <folder launchera>\..\settings.json), inaczej język Windows.
+static int g_lang = 1;  // 0 pl, 1 en, 2 ru
+
+static void DetectLanguage(const std::wstring& dir)
+{
+    LANGID ui = GetUserDefaultUILanguage() & 0x3FF;
+    g_lang = ui == 0x15 ? 0 : ui == 0x19 ? 2 : 1;
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, (dir + L"\\..\\settings.json").c_str(), L"rb") == 0 && f) {
+        char buf[4096] = {0};
+        fread(buf, 1, sizeof(buf) - 1, f);
+        fclose(f);
+        if (strstr(buf, "\"lang\": \"pl\"")) g_lang = 0;
+        else if (strstr(buf, "\"lang\": \"en\"")) g_lang = 1;
+        else if (strstr(buf, "\"lang\": \"ru\"")) g_lang = 2;
+    }
+}
+
+static const wchar_t* T(const wchar_t* pl, const wchar_t* en, const wchar_t* ru)
+{
+    return g_lang == 0 ? pl : g_lang == 2 ? ru : en;
+}
+
 int wmain(int argc, wchar_t** argv)
 {
-    // dowprobe_launcher.exe [--rec] [--out <folder nagrań>] [--logs <folder dzienników>] [folder_gry]
-    bool rec = false;
+    // dowprobe_launcher.exe [--rec] [--out <folder nagrań>] [--logs <folder dzienników>] [--check] [--where] [folder_gry]
+    //   --check  tylko sprawdź: gra znaleziona i nie działa (kod 0) – komunikat w języku użytkownika (Start.bat)
+    // polskie znaki i cyrylica: w konsoli UTF-16 (WriteConsoleW), przy przekierowaniu do pliku/potoku UTF-8
+    _setmode(_fileno(stdout), GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) == FILE_TYPE_CHAR ? _O_U16TEXT : _O_U8TEXT);
+    bool rec = false, check = false, where = false;
     std::wstring game, outArg, logsArg;
     for (int i = 1; i < argc; ++i) {
         if (_wcsicmp(argv[i], L"--rec") == 0) rec = true;
+        else if (_wcsicmp(argv[i], L"--check") == 0) check = true;
+        else if (_wcsicmp(argv[i], L"--where") == 0) where = true;
         else if (_wcsicmp(argv[i], L"--out") == 0 && i + 1 < argc) outArg = argv[++i];
         else if (_wcsicmp(argv[i], L"--logs") == 0 && i + 1 < argc) logsArg = argv[++i];
-        else if (_wcsicmp(argv[i], L"--where") != 0) game = argv[i];
+        else game = argv[i];
     }
-    if (game.empty()) game = FindGameDir();
-    for (int i = 1; i < argc; ++i)
-        if (_wcsicmp(argv[i], L"--where") == 0) {  // diagnostyka: tylko wypisz znaleziony folder gry
-            wprintf(L"%ls\n%ls\n", game.c_str(), HasGame(game) ? L"OK" : L"BRAK W40k.exe");
-            return HasGame(game) ? 0 : 1;
-        }
-    std::wstring exe = game + L"\\W40k.exe";
-
     wchar_t self[MAX_PATH]; GetModuleFileNameW(nullptr, self, MAX_PATH);
     std::wstring dir = self; dir = dir.substr(0, dir.find_last_of(L'\\'));
+    DetectLanguage(dir);
+
+    if (game.empty()) game = FindGameDir();
+    if (where) {  // diagnostyka: tylko wypisz znaleziony folder gry
+        wprintf(L"%ls\n%ls\n", game.c_str(), HasGame(game) ? L"OK" : L"W40k.exe ?");
+        return HasGame(game) ? 0 : 1;
+    }
+    std::wstring exe = game + L"\\W40k.exe";
     std::wstring dll = dir + (rec ? L"\\dowrec.dll" : L"\\dowprobe.dll");
 
-    if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES) { wprintf(L"Brak %ls\n", exe.c_str()); return 1; }
-    if (GetFileAttributesW(dll.c_str()) == INVALID_FILE_ATTRIBUTES) { wprintf(L"Brak %ls\n", dll.c_str()); return 1; }
-    if (IsRunning(L"W40k.exe")) { wprintf(L"W40k.exe juz dziala - zamknij gre i uruchom launcher ponownie.\n"); return 1; }
+    if (!HasGame(game)) {
+        wprintf(T(L"Nie znaleziono Dawn of War: Definitive Edition w bibliotekach Steam.\nUpewnij się, że gra jest zainstalowana przez Steam.\n",
+                  L"Dawn of War: Definitive Edition was not found in your Steam libraries.\nMake sure the game is installed through Steam.\n",
+                  L"Dawn of War: Definitive Edition не найдена в библиотеках Steam.\nУбедитесь, что игра установлена через Steam.\n"));
+        return 1;
+    }
+    if (IsRunning(L"W40k.exe")) {
+        wprintf(T(L"Gra już działa. Zamknij Dawn of War i uruchom Start.bat ponownie.\n",
+                  L"The game is already running. Close Dawn of War and run Start.bat again.\n",
+                  L"Игра уже запущена. Закройте Dawn of War и снова запустите Start.bat.\n"));
+        return 1;
+    }
+    if (check) return 0;
+    if (GetFileAttributesW(dll.c_str()) == INVALID_FILE_ATTRIBUTES) { wprintf(L"%ls: %ls\n", T(L"Brak", L"Missing", L"Нет файла"), dll.c_str()); return 1; }
 
     // log: --logs albo <folder launchera>\..\logs\probe_YYYYMMDD_HHMMSS.log
     std::wstring logs = logsArg.empty() ? dir + L"\\..\\logs" : logsArg;
@@ -158,19 +200,22 @@ int wmain(int argc, wchar_t** argv)
         SetEnvironmentVariableW(L"DOWREC_OUT", recDir);
     }
 
-    wprintf(L"UWAGA: sonda jest przeznaczona TYLKO do ogladania powtorek offline.\n"
-            L"       Nie wchodz w tej sesji gry do rozgrywek online/rankingowych.\n\n");
-    wprintf(L"Gra: %ls\nDLL: %ls\nLog: %ls\n", exe.c_str(), dll.c_str(), full);
-    if (rec) wprintf(L"Zapisy: %ls\n", recDir);
+    wprintf(T(L"UWAGA: tylko do oglądania powtórek. Do gry sieciowej/rankingowej uruchamiaj grę normalnie przez Steam.\n\n",
+              L"NOTE: for watching replays only. For online/ranked games start the game normally through Steam.\n\n",
+              L"ВНИМАНИЕ: только для просмотра реплеев. Для сетевой/рейтинговой игры запускайте игру через Steam.\n\n"));
+    wprintf(L"%ls: %ls\nDLL: %ls\nLog: %ls\n", T(L"Gra", L"Game", L"Игра"), exe.c_str(), dll.c_str(), full);
+    if (rec) wprintf(L"%ls: %ls\n", T(L"Nagrania", L"Recordings", L"Записи"), recDir);
     wprintf(L"\n");
 
     STARTUPINFOW si = { sizeof(si) };
     PROCESS_INFORMATION pi = {};
     std::wstring cmd = L"\"" + exe + L"\"";
     if (!CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, game.c_str(), &si, &pi)) {
-        wprintf(L"CreateProcess nie powiodl sie (blad %lu)\n", GetLastError()); return 1;
+        wprintf(L"CreateProcess: %ls %lu\n", T(L"błąd", L"error", L"ошибка"), GetLastError()); return 1;
     }
-    wprintf(L"Gra uruchomiona (pid %lu). Czekam na DLL moda - przejdz w grze do menu glownego...\n", pi.dwProcessId);
+    wprintf(T(L"Gra uruchomiona. Czekam na menu główne (jeśli ekran jest czarny – kliknij okno gry)...\n",
+              L"Game started. Waiting for the main menu (if the screen stays black, click the game window)...\n",
+              L"Игра запущена. Ожидание главного меню (если экран чёрный – щёлкните окно игры)...\n"));
 
     // Wstrzykujemy dopiero, gdy załadowana jest DLL moda. Wstrzyknięcie w trakcie ładowania statycznych DLL
     // (np. zaraz po SimEngine.dll) zatrzymywało start gry (test 2026-10-17). Czekamy bez limitu czasu.
@@ -179,17 +224,24 @@ int wmain(int argc, wchar_t** argv)
     for (int iter = 0; !ready; ++iter) {
         if (iter % 4 == 0) BringToFront(pi.dwProcessId);
         if (WaitForSingleObject(pi.hProcess, 500) == WAIT_OBJECT_0) break;
-        for (const wchar_t* m : mods) if (HasModule(pi.hProcess, m)) { ready = true; wprintf(L"Wykryto %ls.\n", m); break; }
+        for (const wchar_t* m : mods) if (HasModule(pi.hProcess, m)) { ready = true; wprintf(L"%ls: %ls\n", T(L"Wykryto", L"Detected", L"Обнаружено"), m); break; }
     }
     if (ready) Sleep(1000); // niech mod dokończy inicjalizację
     if (!ready) {
         DWORD ec = 0; GetExitCodeProcess(pi.hProcess, &ec);
-        wprintf(L"Gra zakonczyla sie przed zaladowaniem moda (proces %ls, kod %lu). Jesli gra wystartowala przez Steam jako nowy proces,\n"
-                L"sonda nie zostala wstrzyknieta - zgłoś to.\n", ec == STILL_ACTIVE ? L"dziala" : L"zakonczony", ec);
+        wprintf(T(L"Gra zakończyła się przed załadowaniem menu (kod %lu) – rejestrator nie został wczytany.\n",
+                  L"The game exited before reaching the menu (code %lu) – the recorder was not loaded.\n",
+                  L"Игра завершилась до главного меню (код %lu) – регистратор не загружен.\n"), ec);
         return 2;
     }
     bool ok = Inject(pi.hProcess, dll);
-    wprintf(ok ? L"Sonda wstrzyknieta. Mozesz otworzyc powtorke w grze.\n" : L"Wstrzykniecie NIE powiodlo sie (blad %lu).\n", GetLastError());
+    if (ok)
+        wprintf(T(L"Gotowe. W grze: Powtórki -> wybierz powtórkę -> Odtwórz.\n",
+                  L"Ready. In the game: Replays -> choose a replay -> Play.\n",
+                  L"Готово. В игре: Реплеи -> выберите реплей -> Воспроизвести.\n"));
+    else
+        wprintf(T(L"Wczytanie rejestratora NIE powiodło się (błąd %lu).\n", L"Loading the recorder FAILED (error %lu).\n",
+                  L"Не удалось загрузить регистратор (ошибка %lu).\n"), GetLastError());
     CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
     return ok ? 0 : 3;
 }

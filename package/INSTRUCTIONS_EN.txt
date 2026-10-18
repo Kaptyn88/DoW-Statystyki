@@ -1,0 +1,69 @@
+DoW - replay statistics (Dawn of War: Definitive Edition)
+=========================================================
+
+What it does
+------------
+While you watch a REPLAY it counts for every squad: damage dealt, models killed, damage taken and
+models lost – split by weapons, grenades and abilities (Dark Eldar soul powers as a separate
+"Soul powers" row). Shows it in the "Viewer" window and in a semi-transparent overlay on the game.
+Selecting a squad in the game shows its statistics.
+
+Requirements
+------------
+- Windows 10/11 64-bit
+- Dawn of War: Definitive Edition from Steam (Steam must be running)
+- Nothing else to install.
+
+Starting
+--------
+1. Extract the whole folder anywhere (e.g. Documents\DoW-Statystyki). Do not run it from inside the zip.
+2. Close the game if it is running.
+3. Double-click Start.bat.
+   - On first start Windows may show "Windows protected your PC" (the programs are not signed):
+     click "More info" -> "Run anyway".
+   - The first time, the viewer spends about half a minute building a name catalog from your game files
+     (message at the bottom of the window). After that squad and ability names are shown in your language.
+4. The Viewer window and the game open. If the game stays on a black screen, click its window.
+5. In the game: Replays -> choose a replay -> Play. Statistics are collected from the first second;
+   watch normally or fast-forward.
+
+The game keeps replays in:
+   %APPDATA%\Relic Entertainment\Dawn of War\PLAYBACK
+(paste it into the Explorer address bar). Do not name your own files "temp.rec" – the game overwrites it.
+
+Language
+--------
+Polish, English or Russian – the "Language" list in the Viewer (default: Windows language).
+Unit and ability names come from the game's own translations.
+
+Viewer
+------
+- Squad table: damage dealt, share, kills, damage taken, models lost, FF (friendly fire).
+  Click a column header to sort, use the "Player" list to filter.
+- Click a squad (in the table or in the game): weapons and abilities, damage over time,
+  whom it damaged and who damaged it.
+- The "Time" slider shows the state at any moment, "Live" returns to the current one.
+- "Open…" – earlier recordings (the recordings folder next to Start.bat).
+
+Overlay
+-------
+"Overlay…" button in the Viewer: enable it, choose the number of squads (2–5), sorting, players,
+columns, opacity, text size, the selected-squad section. Drag the overlay where you like it and tick
+"Lock overlay" – clicks then pass through it to the game. Works in borderless window mode (DE default).
+
+Safety
+------
+- Game files are NOT modified. The recorder is loaded only into a game started with Start.bat.
+- It works only while replays are played. When you start a live match it switches itself off.
+  For online / ranked games start the game normally through Steam, not with Start.bat.
+- An antivirus may complain (the tool attaches to the game process). It is the same mechanism
+  that overlays and game tools use; the source code is on GitHub.
+
+If something does not work
+--------------------------
+- Logs: the logs folder (newest rec_*.log file). Recordings: the recordings folder.
+- After a game update it may stop working if the log shows "ERR ... nie znaleziono" (not found).
+  Send that file to the author.
+
+Unofficial tool, not affiliated with Relic Entertainment or SEGA.
+Uses the MinHook library (license in the LICENCJE folder).

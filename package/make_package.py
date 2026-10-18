@@ -4,7 +4,7 @@ Użycie (z katalogu projektu):  .venv\\Scripts\\python package\\make_package.py 
 Wymaga: MSVC Build Tools (probe\\build.bat) i PyInstaller w .venv.
 
 Zawartość:
-  Start.bat, INSTRUKCJA.txt, Podglad.exe (podgląd + nakładka + budowa katalogu nazw),
+  Start.bat, INSTRUKCJA.txt / INSTRUCTIONS_EN.txt / INSTRUKCIYA_RU.txt, Podglad.exe (podgląd + nakładka + budowa katalogu nazw),
   bin\\dowrec.dll, bin\\dowprobe_launcher.exe, LICENCJE\\MinHook.txt
 Nie zawiera danych gry: katalog nazw buduje się z plików gry odbiorcy przy pierwszym uruchomieniu.
 """
@@ -26,9 +26,13 @@ def run(cmd, **kw):
     subprocess.run(cmd, check=True, cwd=ROOT, **kw)
 
 
+ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
+NO_BUILD = '--no-build' in sys.argv  # bez kompilacji MSVC (użyj probe/bin; np. gdy gra trzyma dowrec.dll)
+
+
 def version():
-    if len(sys.argv) > 1:
-        return sys.argv[1]
+    if ARGS:
+        return ARGS[0]
     try:
         return subprocess.run(['git', 'describe', '--tags', '--always', '--dirty'], cwd=ROOT, capture_output=True,
                               text=True, check=True).stdout.strip()
@@ -39,7 +43,8 @@ def version():
 def main():
     ver = version()
     # 1. DLL rejestratora i launcher (MSVC, statyczny runtime /MT – odbiorca nie potrzebuje redystrybucji VC++)
-    run(['cmd', '/c', os.path.join('probe', 'build.bat')])
+    if not NO_BUILD:
+        run(['cmd', '/c', os.path.join('probe', 'build.bat')])
     # 2. Podglad.exe: jeden plik, bez konsoli; moduły katalogu (build_catalog, sga, rgd) wbudowane
     pyinstaller = os.path.join(ROOT, '.venv', 'Scripts', 'pyinstaller.exe')
     run([pyinstaller, '--noconfirm', '--clean', '--onefile', '--windowed', '--name', 'Podglad',
@@ -55,7 +60,8 @@ def main():
     shutil.copy2(os.path.join(WORK, 'dist', 'Podglad.exe'), out)
     for f in ('dowrec.dll', 'dowprobe_launcher.exe'):
         shutil.copy2(os.path.join(ROOT, 'probe', 'bin', f), os.path.join(out, 'bin'))
-    shutil.copy2(os.path.join(PKG, 'INSTRUKCJA.txt'), out)
+    for doc in ('INSTRUKCJA.txt', 'INSTRUCTIONS_EN.txt', 'INSTRUKCIYA_RU.txt'):  # PL / EN / RU
+        shutil.copy2(os.path.join(PKG, doc), out)
     with open(os.path.join(PKG, 'Start.bat'), 'rb') as src:  # CRLF wymagane przez cmd
         data = src.read().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
     with open(os.path.join(out, 'Start.bat'), 'wb') as dst:

@@ -23,10 +23,16 @@ Uruchamianie
    - Przy pierwszym uruchomieniu Windows może pokazać "System Windows ochronił ten komputer"
      (programy nie są podpisane): kliknij "Więcej informacji" -> "Uruchom mimo to".
    - Za pierwszym razem podgląd przez ok. pół minuty buduje katalog nazw z plików Twojej gry
-     (komunikat na dole okna). Potem nazwy oddziałów i zdolności są po polsku.
+     (komunikat na dole okna). Potem nazwy oddziałów i zdolności są w wybranym języku.
 4. Otworzy się okno Podglądu i gra. Jeśli gra stoi na czarnym ekranie – kliknij jej okno.
 5. W grze: Powtórki -> wybierz powtórkę -> Odtwórz. Statystyki zbierają się od pierwszej sekundy,
    możesz oglądać normalnie albo na przyspieszeniu.
+
+Język
+-----
+Polski, angielski lub rosyjski – lista "Język" w Podglądzie (domyślnie język Windows).
+Nazwy jednostek i zdolności pochodzą z oficjalnych tłumaczeń gry.
+Instrukcja po angielsku: INSTRUCTIONS_EN.txt, po rosyjsku: INSTRUKCIYA_RU.txt.
 
 Powtórki gra trzyma w folderze:
    %APPDATA%\Relic Entertainment\Dawn of War\PLAYBACK
