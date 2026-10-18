@@ -726,7 +726,7 @@ static DWORD WINAPI InitThread(LPVOID)
 
     LONG applied = 0;
     for (unsigned iter = 0;; ++iter) {
-        // co 0,1 s zaznaczenie gracza (v1.3; było 0,2 s); co 1 s zegar i zrzut buforów
+        // co 0,1 s zaznaczenie gracza (v1.2; było 0,2 s); co 1 s zegar i zrzut buforów
         DWORD w = WaitForSingleObject(g_armEvent, 100);
         if (w == WAIT_TIMEOUT && g_armed && selection) PollSelection(GameTicks());
         if (w == WAIT_TIMEOUT && iter % 10 != 0) continue;

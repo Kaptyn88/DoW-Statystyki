@@ -308,12 +308,14 @@ Przykładowa powtórka: Downloads\...W-NEC-L-ORK.rec (Necron vs Ork, mapa 2P_TIT
 - Podgląd: kolumna ikon (Treeview #0, wiersz 24 px) i ikona 32 px przy nazwie w szczegółach; nakładka: ikona
   ~2x wielkości tekstu przy nazwie oddziału i w sekcji zaznaczonego oddziału (viewer/iconcache.py).
 
-## Szybsza reakcja na zaznaczenie, nakładka domyślnie włączona (v1.3, 2026-10-18)
+## Szybsza reakcja na zaznaczenie, nakładka domyślnie włączona (v1.2, 2026-10-18)
 - Rejestrator: odczyt zaznaczenia co 0,1 s (było 0,2 s); zegar/zrzut buforów nadal co 1 s (iter % 10).
 - Podgląd: pętla co 0,1 s (było 1 s – to było główne źródło opóźnienia). Zmiana zaznaczenia -> tylko podświetlenie
   wiersza, szczegóły z ostatnich statystyk i nakładka (bez przeliczania); pełne przeliczenie najwyżej raz na sekundę.
   Pomiar (dopisanie rekordu sel -> zmiana w podglądzie): 16–74 ms (było do ~1000 ms).
 - OverlaySettings.enabled domyślnie True (nowi użytkownicy widzą nakładkę od razu).
+- Wydanie v1.2 obejmuje ikony + szybsze zaznaczenie + nakładkę domyślnie włączoną (tag v1.3 usunięty na prośbę
+  użytkownika, v1.2 przeniesiony na ten commit przed publikacją wydania).
 
 ## Docelowy projekt rejestratora (zrealizowany powyżej, notatka historyczna)
 - Hooki: ApplyDamage (wejście/wyjście), SetHealth (faktyczna strata HP), Death (zgon) + bezpiecznik .rec + World (czas).
