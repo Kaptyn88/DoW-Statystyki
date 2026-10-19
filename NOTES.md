@@ -464,6 +464,9 @@ nakładka podsumowania z zakładkami.
   pl -> ru: ikony i teksty poprawne); w katalogu każda pozycja z nazwą PL ma też EN i RU (jednostki 359, oddziały
   207, badania 378, bronie 352, zdolności 334). Przy zmianie języka anulowany zaplanowany _tick starego okna
   (wcześniej Tcl: invalid command name ..._tick).
+- WYDANIE v2.0 (2026-10-19): commit 631f383, tag v2.0 wypchnięty, paczka dist/DoW-Statystyki-v2.0.zip (13 MB);
+  sprawdzone: launcher --check, Podglad.exe z paczki sam buduje katalog v7 (656 ikon, w tym .rtx).
+  Uruchamianie przez Steam (podpięcie do gry uruchomionej przez Steam) przesunięte do v2.1.
 - WYCOFANE na prośbę użytkownika: stały rozmiar okna podsumowania (sum_w/sum_h) – okno znów dopasowuje się do treści.
 - ULEPSZENIA (badania) – ustalenia 2026-10-19:
   - SimEngine nie ma nic o badaniach; wszystko w DXP3Mod (napisy: "Research not found while loading Research Array
