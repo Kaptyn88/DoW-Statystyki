@@ -393,6 +393,65 @@ nakładka podsumowania z zakładkami.
   z rekordami eco wyliczonymi ze zrzutów sondy (scratchpad make_eco_rec.py); DLL skompilowany próbnie –
   NIE sprawdzony w grze (gra trzymała probe/bin/dowrec.dll – przebudować build.bat po jej zamknięciu).
   Zebrane łącznie nie obejmuje zasobów startowych.
+- DRUŻYNY Z GRY (2026-10-19, kod gotowy, NIEPRZETESTOWANY w grze): World::QueryRelationship (SimEngine 0x9c780) =
+  jmp [[World+8]]->vtable+0x40; w silniku WorldImp::IsPlayerRelationship (0xa72e0) to `return rel == 0` (wszyscy
+  "0" – zapewne wrogowie), właściwą relację nadpisuje mod. Rejestrator: rekord {"t":"rel",a,b,q:[r0..r3]} raz na
+  sesję (i przy nowym graczu) dla każdej pary + para (pierwszy gracz, on sam). Podgląd (Recording.teams_from_game):
+  ta sama drużyna, gdy q pary == q gracza z samym sobą; dokładnie 2 drużyny -> używane, inaczej heurystyka z obrażeń.
+  POTWIERDZONE 2026-10-19 na powtórce 3v3 #47672736: PlayerRelationship 0 = WRÓG, 1 = SOJUSZNIK (gracz z samym
+  sobą: [0,1,0,0]; SOB/CSM/SM między sobą [0,1,0,0], z NEC/DE/TAU [1,0,0,0]); 2 i 3 zawsze 0. Drużyny z gry =
+  SOB/CSM/SM vs NEC/DE/TAU, zgodnie z nazwą powtórki.
+- Wygląd podsumowania: pasek zakładek nad treścią (osobna ramka, aktywna zakładka podświetlona, czas po prawej,
+  klik w zakładkę gdy okno odblokowane); usunięty podtytuł "cały mecz · wg obrażeń" (pole show_header zostaje).
+- v2.0 (w toku, 2026-10-19):
+  - Ustawienia: wyłączanie zakładek podsumowania (sum_tabs_off; co najmniej jedna zostaje; F8 tylko po włączonych).
+  - Rejestrator: rekord {"t":"army",tick,pid,n:{bp:liczba}} co ~1 s przy zmianie – Player::GetEntities ->
+    EntityGroup, iteracja EntityHolderGroup::begin/end pod przesunięciem 0/8/0x10 (wybór: pierwsza encja należy do
+    gracza; log "ARMY przesuniecie ..."). POTWIERDZONE 2026-10-19 (3v3 #47672736): przesunięcie 0x0, składy
+    sensowne (chaos_cultist 10, tau_fire_warrior 3 ...). W składzie są też nie-jednostki (strategic_point_flag,
+    blood_splat, relic_struct) – spoza attrib/ebps/races, filtrowane CATALOG.is_unit w Budowie; cena 0, więc
+    wartości armii nie psują. Wartość armii także pod nazwą gracza w zakładce Armia.
+  - Podgląd: Recording.army / first_seen / army_value / army_advantage / build_order; zakładki Budowa (pierwsze
+    pojawienie się typów jednostek/budynków, bez startowych) i Bitwy (Recording.battles: odcinki 10 s z
+    obrażeniami >= 25% szczytu, łączone z przerwą <= 1 odcinka; obrażenia i stracone R/E drużyn); Ekonomia:
+    kolumna Armia + wykres przewagi wartości armii. Bitwy sprawdzone na 3v3 (3 starcia: 4:40, 5:30, 7:40–10:50).
+- Budowa: build_rows (domyślnie 8) widocznych pozycji na gracza, domyślnie najnowsze; wąski pasek przewijania
+  (komórka 'vbar', Canvas height=1 – inaczej domyślna wysokość płótna rozpycha wiersze); kółko myszy przewija
+  wszystkich graczy naraz (build_scroll = pozycje wstecz od najnowszych) – tylko gdy okno odblokowane
+  (zablokowane przepuszcza mysz do gry).
+- is_model: poza ciałami (_corpse) także encje spoza jednostek ras (attrib/ebps/races), np. dark_eldar_soulstorm,
+  dark_eldar_torture_amp_entity, tau_snare_trap – wcześniej w Stratach jako "dark_eld"/"tau_snar" bez ikony.
+- Przerwana budowa (gra zwraca całość zasobów) i usunięcie budynków pokonanego gracza: rekord 'die' budynku bez
+  trafienia od wroga w ostatnich 10 s (Recording.NOT_LOST_S) -> Recording.not_lost, bez straty/zabicia/bitwy.
+  W nagraniach: generator Chaosu (tick 68), generator Tau (1585), Nekronów (2389) – nigdy trafione; HQ i koszary
+  Tau na końcu meczu (ostatnie trafienie 60–95 s wcześniej). Zniszczone budynki giną od dmg.k albo 'die' 0–9 ticków
+  po trafieniu. Ryzyko: budynek dobity samymi obrażeniami spoza ApplyDamage (np. moc DoT) >10 s po ostatnim
+  zwykłym trafieniu zostałby uznany za "bez walki".
+  UWAGA użytkownika: budowę często anuluje się właśnie POD OSTRZAŁEM – reguła 10 s tego nie łapie. Dlatego rekord
+  'die' z hkDeath ma teraz "hp" (ReadHealth przed oryginałem) i "fl" (flaga Death). Podgląd: budynek z hp > 0 =
+  anulowany/usunięty (nie strata), hp = 0 = zniszczony; bez pola hp (stare nagrania) – reguła 10 s.
+  TEST (DE vs TAU #38380165, generator Tau anulowany tick 1585): hp = 0.0 (gra zeruje HP przed Death), fl =
+  880008881921 (młodszy bajt 1, reszta śmieci z rejestru) – HP NIE rozróżnia. OSTATECZNA REGUŁA: budynek z rekordem
+  'die' (by = 0, czyli Death poza ApplyDamage) = anulowany/usunięty, nie strata – niezależnie od wcześniejszych
+  trafień; budynki zniszczone w walce giną od dmg.k (w nagraniach zawsze). Przykłady 3v3: generator Nekronów
+  trafiony 233 pkt w 2666–2682, 'die' 2691 (anulowanie pod ostrzałem); wieżyczka Nekronów 52 trafienia, 'die' 3 ticki
+  po ostatnim. Ryzyko: budynek dobity obrażeniami spoza ApplyDamage (moc DoT) – nie zaobserwowane.
+- Rekord res POTWIERDZONY w grze po poprawce (tau_anti_grav_research, tick 422, powtórka DE vs TAU 2026-10-19).
+- FAKTYCZNIE WYDANE (wybór użytkownika, 2026-10-19): cena modelu (ebps) != koszt uzupełnienia (sbps
+  squad_reinforce_ext/cost/cost): wojownik Nekronów 0 / 35 E, gwardzista 32 / 20 R, szturmowy SM 52,5 / 55 R.
+  Rejestrator: rekord {"t":"seen",tick,e,bp,sq,sqbp,pid} przy pierwszym pojawieniu się encji w oddziale (z pętli
+  "army"). Podgląd (Recording._add_seen/unit_value): model obecny <= INITIAL_S = 2 s od pojawienia się oddziału =
+  zakup (cena ebps), później = uzupełnienie (koszt uzupełnienia) albo lider (squad_leader_ext/*/leader/type – cena
+  ebps). Broń z ceną (weapon cost/cost, 203 rodzaje) doliczana do modelu, który jej użył (dmg.w) – broń kupiona,
+  a nieużyta, niewidoczna. Wartość armii: liczba modeli z 'army' x średnia wydana wartość żywych modeli typu.
+  Katalog v6: squads[*].reinforce/leaders, weapons[*].cost. DO SPRAWDZENIA: czy któraś broń startowa ma cenę
+  (np. space_marine_missile_krak_tempest) – liczyłaby się podwójnie.
+  POTWIERDZONE w grze (NEC vs ORK #47673293, 2026-10-19, 475 rekordów seen): wojownicy Nekronów 5 x 0 (zakup) +
+  3 x 35 E (uzupełnienia); strzelcy Orków 35 R / 75 R + 10 E (uzupełnienie/broń); suma strat Frintta 542 E zgodna
+  z zakładką. Aktualna wartość armii przeniesiona (prośba użytkownika) z Armii i Ekonomii do zakładki Bitwy: gracze,
+  suma drużyny, wykres przewagi wartości armii, pod spodem bitwy.
+- Frakcja gracza (Recording.player_race): rasa większości jego encji wg katalogu (units[*].race), bez 'npc';
+  w zakładkach "Nick (Frakcja)" (overlay.pname), nazwy race_* PL/EN/RU. Sprawdzone na 3v3, NEC-ORK, DE-TAU.
 - WYCOFANE na prośbę użytkownika: stały rozmiar okna podsumowania (sum_w/sum_h) – okno znów dopasowuje się do treści.
 - ULEPSZENIA (badania) – ustalenia 2026-10-19:
   - SimEngine nie ma nic o badaniach; wszystko w DXP3Mod (napisy: "Research not found while loading Research Array
@@ -407,6 +466,15 @@ nakładka podsumowania z zakładkami.
     ork_research_eavy_armor_boyz 3137 (6:32), ork_research_burna 3377 (7:01–7:02). +0x290 = typy postawionych
     budynków (ork_boy_hut, ork_generator, ...), nie badania.
   - Rejestrator: rekord {"t":"res",tick,pid,name} co ~1 s przy wydłużeniu +0x2a8 (ResearchRecords).
+    BŁĄD (zgłoszony przez użytkownika: bionika SM 7:35 w 3v3 nie pokazała się): pierwsza wersja czytała *element jako
+    tekst, a nazwa jest o wskaźnik głębiej (**element; zapas: tekst w obiekcie – krótki std::string) – żaden rekord
+    res nie powstał w żadnym nagraniu; zakładkę testowałem na nagraniu z rekordami dopisanymi z logu sondy, więc
+    tego nie wyłapałem. Poprawione + reset listy przy nowej sesji. DO SPRAWDZENIA w grze.
+  - "Ulepszenia globalne" wg użytkownika = badania w budynkach + badania ekonomiczne (więcej R/E globalnie):
+    *_requisition_research_N / *_power_research_N / *_upgrade_requisition_N / *_upgrade_power_N (34 w danych:
+    4 na rasę, Nekroni 2) – Catalog.is_eco_research, w zakładce na zielono. Dobudówki budynków (+0x308 "AddOn
+    Array" w SigmaPlayer, loader 0x19a6a0; 64 add-ony w attrib/addons: posterunki, HQ, wieżyczki) – użytkownik NIE
+    chce ich w statystykach, kod wycofany (generatory nie mają add-onów w danych).
   - Katalog v5: research[name] = nazwa pl/en/ru (ui_info/screen_name_id), ikona, rasa, koszt time_cost/cost
     (417 badań, 277 z ikoną). Zakładka "Ulepszenia": drużyny w dwóch kolumnach, czas + ikona + nazwa, "wydano R/E".
 - (stare) DO ZROBIENIA: sonda ekonomii (zebrane zasoby gracza – licznik z ekranu statystyk końcowych?), sonda ulepszeń

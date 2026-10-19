@@ -12,7 +12,7 @@ import ctypes
 import json
 import os
 import tkinter as tk
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from tkinter import ttk
 
 import iconcache
@@ -40,6 +40,8 @@ class OverlaySettings:
     enabled: bool = True          # nakładka oddziału; domyślnie włączona (v1.2); wyłączenie zapisuje się w settings.json
     sum_enabled: bool = True      # nakładka podsumowania (v1.4)
     sum_tab: str = 'army'
+    sum_tabs_off: list = field(default_factory=list)
+    build_rows: int = 8           # widoczne wiersze kolejności budowy na gracza (reszta pod przewijaniem)  # wyłączone zakładki podsumowania (kody, np. 'eco')
     sum_x: int = 40
     sum_y: int = 420
     key_unit: str = 'F6'          # skróty: pokaż/ukryj nakładkę oddziału, podsumowanie, następna zakładka ('' = brak)
@@ -53,7 +55,7 @@ class OverlaySettings:
     show_kills: bool = True
     show_lost: bool = False
     show_share: bool = False
-    show_header: bool = True
+    show_header: bool = True      # (do v1.4 podtytuł zakresu/sortowania – usunięty; pole dla zgodności)
     show_selected: bool = True    # (do v1.3 sekcja zaznaczonego oddziału; teraz osobna nakładka – pole dla zgodności)
     opacity: float = 0.75
     font_size: int = 11
@@ -190,7 +192,7 @@ class OverlayWindow(tk.Toplevel):
             w, prev = self._cells.get(key, (None, None))
             if w is None:
                 w = (tk.Frame(self.body, height=1, bg='#3a434c') if c['kind'] == 'sep'
-                     else tk.Canvas(self.body, bg=self.BG, highlightthickness=0) if c['kind'] == 'chart'
+                     else tk.Canvas(self.body, bg=self.BG, highlightthickness=0) if c['kind'] in ('chart', 'vbar')
                      else tk.Label(self.body, bg=self.BG))
                 self.bind_all_drag(w)
             if prev == c:
@@ -205,6 +207,12 @@ class OverlayWindow(tk.Toplevel):
             elif c['kind'] == 'chart':
                 draw_chart(w, c)
                 w.grid(row=c['row'], column=c['col'], columnspan=c['span'], sticky='w', pady=(2, 6))
+            elif c['kind'] == 'vbar':
+                w.configure(width=4, height=1)  # wysokość z wierszy (sticky ns), nie z płótna
+                w.spec = c
+                w.bind('<Configure>', lambda e, cv=w: draw_vbar(cv))
+                w.grid(row=c['row'], column=c['col'], rowspan=c['rows'], sticky='ns', padx=(4, 0), pady=2)
+                draw_vbar(w)
             else:
                 w.grid(row=c['row'], column=c['col'], columnspan=c['span'], sticky='we', pady=(6, 4))
             self._cells[key] = (w, c)
@@ -238,6 +246,11 @@ class Cells(list):
     def sep(self, row, span):
         self.append({'kind': 'sep', 'row': row, 'col': 0, 'span': span})
 
+    def vbar(self, row, col, rows, first, shown, total):
+        """Wąski pasek przewijania obok listy: widoczne pozycje first..first+shown z total."""
+        self.append({'kind': 'vbar', 'row': row, 'col': col, 'span': 1, 'rows': rows, 'first': first,
+                     'shown': shown, 'total': total})
+
     def chart(self, row, span, points, colors, width, height, end_label):
         self.append({'kind': 'chart', 'row': row, 'col': 0, 'span': span, 'points': tuple(points),
                      'colors': tuple(colors), 'w': width, 'h': height, 'end': end_label})
@@ -248,6 +261,16 @@ def _dim(color, bg='#11151a', k=0.35):
     a = [int(color[i:i + 2], 16) for i in (1, 3, 5)]
     b = [int(bg[i:i + 2], 16) for i in (1, 3, 5)]
     return '#' + ''.join(f'{round(x * k + y * (1 - k)):02x}' for x, y in zip(a, b))
+
+
+def draw_vbar(cv):
+    c = cv.spec
+    cv.delete('all')
+    h = max(1, cv.winfo_height())
+    cv.create_rectangle(0, 0, 4, h, fill='#1f262d', outline='')
+    total = max(1, c['total'])
+    y0, y1 = h * c['first'] / total, h * (c['first'] + c['shown']) / total
+    cv.create_rectangle(0, y0, 4, max(y0 + 6, y1), fill='#6b7580', outline='')
 
 
 def draw_chart(cv, c):
@@ -291,6 +314,13 @@ def draw_chart(cv, c):
     cv.create_text(right, h - 2, text=c['end'], anchor='se', fill='#6b747c', font=font)
 
 
+def pname(rec, pid):
+    """Nick gracza z frakcją, np. 'Frintt (Nekroni)'; frakcja z jednostek gracza (Recording.player_race)."""
+    name = rec.players.get(pid, '?')
+    race = rec.player_race(pid)
+    return f'{name} ({t("race_" + race)})' if race else name
+
+
 def fmt_res(req, pw):
     """Rekwizycja i energia, np. '450 R / 50 E' (skróty w języku interfejsu)."""
     return t('res_fmt', r=f'{req:.0f}', p=f'{pw:.0f}')
@@ -325,7 +355,17 @@ class UnitOverlay(OverlayWindow):
         return c
 
 
-SUMMARY_TABS = ('army', 'losses', 'eco', 'research')
+SUMMARY_TABS = ('army', 'losses', 'eco', 'research', 'build', 'battles')
+
+
+def visible_tabs(s):
+    """Włączone zakładki podsumowania w stałej kolejności (co najmniej jedna)."""
+    return [x for x in SUMMARY_TABS if x not in s.sum_tabs_off] or [SUMMARY_TABS[0]]
+
+
+def current_tab(s):
+    tabs = visible_tabs(s)
+    return s.sum_tab if s.sum_tab in tabs else tabs[0]
 LOST_PER_ROW = 12  # ikon w wierszu zakładki Straty
 
 
@@ -333,25 +373,95 @@ class SummaryOverlay(OverlayWindow):
     """Nakładka 2: podsumowanie meczu w zakładkach (przełączane skrótem klawiszowym)."""
     POS = ('sum_x', 'sum_y')
     OPACITY, LOCK = 'sum_opacity', 'sum_locked'
+    TAB_BG, TAB_ACTIVE_BG = '#1a2027', '#2e3a46'
+
+    def __init__(self, master, settings: OverlaySettings):
+        super().__init__(master, settings)
+        # pasek zakładek nad siatką treści (osobna ramka – szerokości "przycisków" nie zależą od kolumn tabel)
+        self.bar = tk.Frame(self, background=self.TAB_BG, padx=6, pady=4)
+        self.bar.pack(fill='x', before=self.body)
+        self.bind_all_drag(self.bar)
+        self._tabs = {}
+        for name in SUMMARY_TABS:
+            w = tk.Label(self.bar, text=t('tab_' + name), bg=self.TAB_BG, padx=10, pady=2)
+            w.pack(side='left', padx=(0, 4))
+            self.bind_all_drag(w)  # najpierw przeciąganie, potem kliknięcie zakładki (add='+', bez nadpisania)
+            w.bind('<ButtonRelease-1>', lambda e, n=name: self._click_tab(n), add='+')
+            self._tabs[name] = w
+        self._clock = tk.Label(self.bar, text='', bg=self.TAB_BG, fg='#9aa3ab')
+        self._clock.pack(side='right')
+        self.bind_all_drag(self._clock)
+        self._bar_state = None
+        self.on_tab = None  # ustawia menedżer: zmiana zakładki kliknięciem (okno odblokowane)
+
+    def _click_tab(self, name):
+        if not self.locked and self.on_tab and not self._dragged:
+            self.on_tab(name)
+
+    def _start_drag(self, e):
+        self._dragged = False
+        super()._start_drag(e)
+
+    def _on_drag(self, e):
+        self._dragged = True
+        super()._on_drag(e)
+
+    _dragged = False
+    build_scroll = 0
+
+    def bind_all_drag(self, w):
+        super().bind_all_drag(w)
+        w.bind('<MouseWheel>', self._wheel)
+
+    def _wheel(self, e):
+        if current_tab(self.s) != 'build' or self.locked:
+            return
+        self.build_scroll = max(0, self.build_scroll + (1 if e.delta > 0 else -1))
+        self._last_cells = None
+        self.render(self._rec)
+
+    _rec = None
+
+    def render(self, rec):
+        self._rec = rec
+        super().render(rec)
+        tab = current_tab(self.s)
+        shown = tuple(visible_tabs(self.s))
+        clock = fmt_time(rec.max_tick, rec.tps) if rec is not None and rec.events else ''
+        state = (tab, shown, clock, self.s.font_size)
+        if state == self._bar_state:
+            return
+        if not self._bar_state or self._bar_state[1] != shown:  # zmiana listy zakładek: ułóż od nowa
+            for w in self._tabs.values():
+                w.pack_forget()
+            for name in shown:
+                self._tabs[name].pack(side='left', padx=(0, 4))
+        self._bar_state = state
+        for name, w in self._tabs.items():
+            on = name == tab
+            w.configure(bg=self.TAB_ACTIVE_BG if on else self.TAB_BG, fg='#ffffff' if on else '#7d8790',
+                        font=('Segoe UI', self.s.font_size, 'bold' if on else 'normal'))
+        self._clock.configure(text=clock, font=('Segoe UI', self.s.font_size))
 
     def _layout(self, rec, c):
         s = self.s
-        tab = s.sum_tab if s.sum_tab in SUMMARY_TABS else SUMMARY_TABS[0]
+        tab = current_tab(s)
         if rec is None or not rec.events:
             c.label(t('ov_wait'), 0, 0, fg='#9aa3ab', f=c.small)
             if not self.locked:
                 c.label(t('ov_drag'), 1, 0, fg='#6b747c', f=c.small)
             return c
         tick = rec.max_tick
-        # pasek zakładek: bieżąca jasna, pozostałe przygaszone; czas meczu na końcu
-        names = '   '.join(f'[{t("tab_" + x)}]' if x == tab else t('tab_' + x) for x in SUMMARY_TABS)
-        c.label(f'{names}   ·  {fmt_time(tick, rec.tps)}', 0, 0, fg='#c0c6cc', f=c.small, columnspan=11)
         if tab == 'losses':
             self._losses(rec, c, tick)
         elif tab == 'eco':
             self._eco(rec, c, tick)
         elif tab == 'research':
             self._research(rec, c)
+        elif tab == 'build':
+            self._build(rec, c)
+        elif tab == 'battles':
+            self._battles(rec, c)
         else:
             self._army(rec, c, tick)
         return c
@@ -368,11 +478,6 @@ class SummaryOverlay(OverlayWindow):
                                          ('lost', t('ov_col_lost'), s.show_lost)) if on]
         width = 1 + len(cols)          # kolumny siatki jednej drużyny
         top = 1
-        if s.show_header:
-            win = window_label(s.window_s) if s.window_s in WINDOW_VALUES else ''
-            by = t('ov_by_kills') if s.sort_by == 'kills' else t('ov_by_dmg')
-            c.label(f'{win}  ·  {by}', top, 0, fg='#9aa3ab', f=c.small, columnspan=2 * width + 1)
-            top += 1
         total = st.total_dealt() or 1
 
         def top_units(pid):
@@ -386,7 +491,7 @@ class SummaryOverlay(OverlayWindow):
                 c.label('', top, width, padx=(14, 14))
             row = top
             for pid in team:
-                c.label(rec.players.get(pid, '?'), row, col0, fg=pcolor.get(pid, '#ccc'), f=c.bold,
+                c.label(pname(rec, pid), row, col0, fg=pcolor.get(pid, '#ccc'), f=c.bold,
                         pady=(6 if row > top else 0, 0))
                 for i, (cid, head) in enumerate(cols):  # nagłówki kolumn w wierszu gracza
                     c.label(head, row, col0 + 1 + i, fg='#6b747c', f=c.small, anchor='e', padx=(6, 0),
@@ -418,13 +523,13 @@ class SummaryOverlay(OverlayWindow):
             if side:
                 c.sep(row, LOST_PER_ROW)
                 row += 1
-            names = '  ·  '.join(rec.players.get(p, '?') for p in team)
+            names = '  ·  '.join(pname(rec, p) for p in team)
             c.label(names, row, 0, fg=pcolor.get(team[0], '#e6e9ec') if team else '#e6e9ec', f=c.bold,
                     columnspan=LOST_PER_ROW)
             row += 1
             lost = collections.Counter(
                 bp for eid, bp in ((e, rec.ent_bp.get(e)) for e in rec.death_tick)
-                if rec.ent_pid.get(eid) in team and is_model(bp))
+                if rec.ent_pid.get(eid) in team and is_model(bp) and eid not in rec.not_lost)
             if not lost:
                 c.label('–', row, 0, fg='#6b747c')
                 row += 1
@@ -461,7 +566,7 @@ class SummaryOverlay(OverlayWindow):
                 row += 1
             for pid in team:
                 e = rec.eco_at(pid)
-                c.label(rec.players.get(pid, '?'), row, 0, fg=pcolor.get(pid, '#e6e9ec'), f=c.bold)
+                c.label(pname(rec, pid), row, 0, fg=pcolor.get(pid, '#e6e9ec'), f=c.bold)
                 if e:
                     _, req, pw, ir, ip, cr, cp = e
                     for i, (a, b) in enumerate(((req, pw), (ir * per_min, ip * per_min), (cr, cp))):
@@ -470,10 +575,11 @@ class SummaryOverlay(OverlayWindow):
         colors = [pcolor.get(team[0], '#e6e9ec') if team else '#e6e9ec' for team in teams]
         width, height = self.s.font_size * 46, self.s.font_size * 11
         names = [' · '.join(rec.players.get(p, '?') for p in team) for team in teams]
-        for which, key in ((3, 'eco_chart_req'), (4, 'eco_chart_pow')):
-            c.label(t(key, a=names[0], b=names[1]), row, 0, fg='#c0c6cc', f=c.small, columnspan=4, pady=(8, 0))
+        charts = [('eco_chart_req', rec.income_advantage(teams, 3)), ('eco_chart_pow', rec.income_advantage(teams, 4))]
+        for key, points in charts:
+            c.label(t(key, a=names[0], b=names[1]), row, 0, fg='#c0c6cc', f=c.small, columnspan=5, pady=(8, 0))
             row += 1
-            c.chart(row, 4, rec.income_advantage(teams, which), colors, width, height, fmt_time(tick, rec.tps))
+            c.chart(row, 5, points, colors, width, height, fmt_time(tick, rec.tps))
             row += 1
 
     def _research(self, rec, c):
@@ -492,7 +598,7 @@ class SummaryOverlay(OverlayWindow):
                 done = rec.research.get(pid, [])
                 req = sum(CATALOG.research_cost(n)[0] for _, n in done)
                 pw = sum(CATALOG.research_cost(n)[1] for _, n in done)
-                c.label(rec.players.get(pid, '?'), row, col0, fg=pcolor.get(pid, '#ccc'), f=c.bold, columnspan=2,
+                c.label(pname(rec, pid), row, col0, fg=pcolor.get(pid, '#ccc'), f=c.bold, columnspan=2,
                         pady=(6 if row > 1 else 0, 0))
                 row += 1
                 if not done:
@@ -500,12 +606,101 @@ class SummaryOverlay(OverlayWindow):
                     row += 1
                 for tick, name in done:
                     c.label(fmt_time(tick, rec.tps), row, col0, fg='#9aa3ab', f=c.small, anchor='e', padx=(0, 6))
-                    c.label(f' {CATALOG.research(name) or name}', row, col0 + 1,
+                    eco = CATALOG.is_eco_research(name)  # ekonomiczne (więcej R/E globalnie) – wyróżnione
+                    c.label(f' {CATALOG.research(name) or name}', row, col0 + 1, fg='#7fd88f' if eco else '#e6e9ec',
                             image=iconcache.photo(CATALOG.icon_file(CATALOG.research_icon(name), c.icon_px)))
                     row += 1
                 if done:
                     c.label(t('res_spent', v=fmt_res(req, pw)), row, col0 + 1, fg='#6b747c', f=c.small)
                     row += 1
+
+    def _build(self, rec, c):
+        """Kolejność budowy (rekord 'army'): drużyny w dwóch kolumnach, gracz i typy jednostek/budynków w chwili
+        pierwszego pojawienia się (bez tego, co gracz miał od startu)."""
+        if not rec.army:
+            c.label(t('build_none'), 1, 0, fg='#6b747c', f=c.small, columnspan=6)
+            return
+        pcolor = self.colors(rec)
+        rows = max(3, self.s.build_rows)
+        orders = {pid: [(tk_, bp) for tk_, bp in rec.build_order(pid) if is_model(bp) and CATALOG.is_unit(bp)]
+                  for pid in rec.players}
+        # przewijanie: build_scroll = ile pozycji wstecz od najnowszych (0 = śledź najnowsze), wspólne dla graczy
+        longest = max((len(o) for o in orders.values()), default=0)
+        self.build_scroll = max(0, min(self.build_scroll, longest - rows))
+        for side, team in enumerate(rec.teams()):
+            col0 = side * 4  # kolumny: czas, nazwa, pasek przewijania, odstęp
+            if side:
+                c.label('', 1, 3, padx=(14, 14))
+            row = 1
+            for pid in team:
+                c.label(pname(rec, pid), row, col0, fg=pcolor.get(pid, '#ccc'), f=c.bold, columnspan=2,
+                        pady=(6 if row > 1 else 0, 0))
+                row += 1
+                order = orders.get(pid, [])
+                if not order:
+                    c.label('–', row, col0 + 1, fg='#6b747c')
+                    row += 1
+                    continue
+                end = max(min(rows, len(order)), len(order) - self.build_scroll)
+                first = max(0, end - rows)
+                if len(order) > rows:
+                    c.vbar(row, col0 + 2, end - first, first, end - first, len(order))
+                for tick, bp in order[first:end]:
+                    struct_ = CATALOG.is_structure(bp)
+                    c.label(fmt_time(tick, rec.tps), row, col0, fg='#9aa3ab', f=c.small, anchor='e', padx=(0, 6))
+                    c.label(f' {CATALOG.squad(bp) or bp}', row, col0 + 1, fg='#c9b27c' if struct_ else '#e6e9ec',
+                            image=iconcache.photo(CATALOG.icon_file(CATALOG.squad_icon(bp), c.icon_px)))
+                    row += 1
+
+    def _battles(self, rec, c):
+        """Aktualna wartość armii (stan na teraz: żywe jednostki, faktycznie wydane – zakup, uzupełnienia, broń)
+        każdego gracza i drużyny + wykres przewagi wartości armii, pod spodem największe bitwy (obrażenia i straty)."""
+        pcolor = self.colors(rec)
+        teams = rec.teams()
+        colors = [pcolor.get(team[0], '#e6e9ec') if team else '#e6e9ec' for team in teams]
+        names = [(rec.players.get(team[0], '?') + (f' +{len(team) - 1}' if len(team) > 1 else '')) if team else '?'
+                 for team in teams]
+        row = 1
+        if rec.army:
+            c.label(t('bat_army_now'), row, 0, fg='#c0c6cc', f=c.small, columnspan=5)
+            row += 1
+            for side, team in enumerate(teams):
+                total = [0.0, 0.0]
+                for pid in team:
+                    v = rec.army_value(pid)[0]
+                    total = [total[0] + v[0], total[1] + v[1]]
+                    c.label(pname(rec, pid), row, 0, fg=pcolor.get(pid, '#e6e9ec'), columnspan=2)
+                    c.label(fmt_res(*v), row, 2, anchor='e', padx=(14, 0))
+                    row += 1
+                if len(team) > 1:
+                    c.label(t('bat_team_total'), row, 0, fg='#9aa3ab', f=c.small, columnspan=2)
+                    c.label(fmt_res(*total), row, 2, fg=colors[side], f=c.bold, anchor='e', padx=(14, 0))
+                    row += 1
+            full = [' · '.join(rec.players.get(p, '?') for p in team) for team in teams]
+            c.label(t('eco_chart_army', a=full[0], b=full[1]), row, 0, fg='#c0c6cc', f=c.small, columnspan=5,
+                    pady=(8, 0))
+            row += 1
+            c.chart(row, 5, rec.army_advantage(teams), colors, self.s.font_size * 46, self.s.font_size * 11,
+                    fmt_time(rec.max_tick, rec.tps))
+            row += 1
+        fights = rec.battles()
+        if not fights:
+            c.label('–', row, 0, fg='#6b747c')
+            return
+        heads = (t('bat_col_time'), t('bat_col_dmg', n=names[0]), t('bat_col_dmg', n=names[1]),
+                 t('bat_col_lost', n=names[0]), t('bat_col_lost', n=names[1]))
+        for i, head in enumerate(heads):
+            c.label(head, row, i, fg='#6b747c', f=c.small, anchor='w' if i == 0 else 'e', padx=(0 if i == 0 else 14, 0))
+        row += 1
+        for start, end, d, l in fights:
+            win = 0 if sum(l[0]) < sum(l[1]) else 1  # drużyna z mniejszymi stratami – pogrubiona
+            c.label(f'{fmt_time(start, rec.tps)}–{fmt_time(end, rec.tps)}', row, 0, fg='#c0c6cc')
+            for i in (0, 1):
+                c.label(f'{d[i]:.0f}', row, 1 + i, fg=colors[i], anchor='e', padx=(14, 0))
+                c.label(fmt_res(*l[i]), row, 3 + i, fg=colors[i], f=c.bold if i == win else c.font, anchor='e',
+                        padx=(14, 0))
+            row += 1
+        c.label(t('bat_note'), row, 0, fg='#6b747c', f=c.small, columnspan=5, pady=(4, 0))
 
 
 class Overlays:
@@ -514,6 +709,7 @@ class Overlays:
     def __init__(self, master, settings: OverlaySettings):
         self.master, self.s = master, settings
         self.unit = self.summary = None
+        self._rec = None
         self.hotkeys = Hotkeys()
         self.apply_hotkeys()
 
@@ -523,10 +719,13 @@ class Overlays:
 
     def changed(self, rec):
         """Po zmianie ustawień: tworzy/zamyka okna, odświeża styl i treść."""
+        self._rec = rec
         for attr, cls, on in (('unit', UnitOverlay, self.s.enabled), ('summary', SummaryOverlay, self.s.sum_enabled)):
             w = getattr(self, attr)
             if on and not w:
                 setattr(self, attr, cls(self.master, self.s))
+                if attr == 'summary':
+                    self.summary.on_tab = self._set_tab
             elif not on and w:
                 w.destroy()
                 setattr(self, attr, None)
@@ -536,7 +735,14 @@ class Overlays:
                 w._last_cells = None
                 w.render(rec)
 
+    def _set_tab(self, name):
+        self.s.sum_tab = name
+        self.s.save()
+        self.summary._last_cells = None
+        self.summary.render(self._rec)
+
     def render(self, rec):
+        self._rec = rec
         for w in (self.unit, self.summary):
             if w:
                 w.render(rec)
@@ -553,8 +759,9 @@ class Overlays:
                 if not self.s.sum_enabled:
                     self.s.sum_enabled = True
                 else:
-                    i = SUMMARY_TABS.index(self.s.sum_tab) if self.s.sum_tab in SUMMARY_TABS else 0
-                    self.s.sum_tab = SUMMARY_TABS[(i + 1) % len(SUMMARY_TABS)]
+                    tabs = visible_tabs(self.s)
+                    i = tabs.index(current_tab(self.s))
+                    self.s.sum_tab = tabs[(i + 1) % len(tabs)]
         if acts:
             self.s.save()
             self.changed(rec)
@@ -613,6 +820,18 @@ class OverlaySettingsWindow(tk.Toplevel):
         section(t('set_sec_summary'))
         check('sum_enabled', t('set_show_summary'))
         look('sum_opacity', 'sum_locked')
+        self.v['build_rows'] = tk.IntVar(value=settings.build_rows)
+        row(t('set_build_rows'), ttk.Spinbox(f, from_=3, to=30, width=5, textvariable=self.v['build_rows'],
+                                             command=self._apply, state='readonly'))
+        ttk.Label(f, text=t('set_tabs')).grid(row=r, column=0, sticky='nw', pady=3)
+        tf = ttk.Frame(f)
+        tf.grid(row=r, column=1, sticky='w')
+        r += 1
+        self.tab_vars = {}
+        for i, name in enumerate(SUMMARY_TABS):
+            var = self.tab_vars[name] = tk.BooleanVar(value=name not in settings.sum_tabs_off)
+            ttk.Checkbutton(tf, text=t('tab_' + name), variable=var, command=self._apply).grid(
+                row=i // 2, column=i % 2, sticky='w', padx=(0, 10))
         self.v['count'] = tk.IntVar(value=settings.count)
         row(t('set_count'), ttk.Spinbox(f, from_=2, to=5, width=5, textvariable=self.v['count'], command=self._apply,
                                         state='readonly'))
@@ -626,8 +845,7 @@ class OverlaySettingsWindow(tk.Toplevel):
         cf.grid(row=r, column=1, sticky='w')
         r += 1
         for i, (key, text) in enumerate([('show_dealt', t('chk_dealt')), ('show_kills', t('chk_kills')),
-                                         ('show_lost', t('chk_lost')), ('show_share', t('chk_share')),
-                                         ('show_header', t('chk_header'))]):
+                                         ('show_lost', t('chk_lost')), ('show_share', t('chk_share'))]):
             self.v[key] = tk.BooleanVar(value=getattr(settings, key))
             ttk.Checkbutton(cf, text=text, variable=self.v[key], command=self._apply).grid(row=i // 2, column=i % 2,
                                                                                            sticky='w', padx=(0, 10))
@@ -678,10 +896,16 @@ class OverlaySettingsWindow(tk.Toplevel):
         s.count = int(v['count'].get())
         s.sort_by = self.sorts.get(v['sort_by'].get(), 'dealt')
         s.window_s = self.windows.get(v['window_s'].get(), 0)
-        for key in ('show_dealt', 'show_kills', 'show_lost', 'show_share', 'show_header', 'locked', 'sum_locked'):
+        for key in ('show_dealt', 'show_kills', 'show_lost', 'show_share', 'locked', 'sum_locked'):
             setattr(s, key, v[key].get())
         s.opacity = round(float(v['opacity'].get()), 2)
         s.sum_opacity = round(float(v['sum_opacity'].get()), 2)
         s.font_size = int(v['font_size'].get())
+        s.build_rows = int(v['build_rows'].get())
+        off = [name for name, var in self.tab_vars.items() if not var.get()]
+        if len(off) == len(SUMMARY_TABS):  # co najmniej jedna zakładka zostaje włączona
+            self.tab_vars[SUMMARY_TABS[0]].set(True)
+            off.remove(SUMMARY_TABS[0])
+        s.sum_tabs_off = off
         s.save()
         self.on_change()

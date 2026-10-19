@@ -25,7 +25,8 @@ LAYERS = [('DoWDE', r'DoWDE\DoWDE.sga'), ('DXP3', r'DXP3\DXP3Data.sga'), ('DXP2'
 KEYS = ['GameData', 'ui_info', 'ui_ext', 'screen_name_id', 'help_text_list', 'icon_name', 'area_effect',
         'area_effect_information', 'weapon_damage', 'armour_damage', 'min_damage', 'max_damage', 'radius',
         'duration_time', 'recharge_time', 'refresh_time', 'child_ability_name', '$REF', 'melee_weapon',
-        'cost_ext', 'time_cost', 'cost', 'requisition', 'power']
+        'cost_ext', 'time_cost', 'cost', 'requisition', 'power', 'squad_reinforce_ext', 'squad_leader_ext', 'leader',
+        'type', 'squad_loadout_ext', 'trooper_base', 'unit_min']
 # przedrostek nazwy -> nazwa folderu rasy w attrib/ebps/races
 RACE_PREFIXES = [('dark_eldar', 'dark_eldar'), ('space_marine', 'space_marines'), ('chaos', 'chaos'),
                  ('eldar', 'eldar'), ('guard', 'guard'), ('ork', 'orks'), ('necron', 'necrons'), ('tau', 'tau'),
@@ -237,7 +238,7 @@ def _build(args):
                 print('  pominięto', p, e, file=sys.stderr)
         return out
 
-    cat = {'version': 5, 'abilities': {}, 'weapons': {}, 'units': {}, 'squads': {}, 'research': {}, 'source': {
+    cat = {'version': 6, 'abilities': {}, 'weapons': {}, 'units': {}, 'squads': {}, 'research': {}, 'source': {
         'layers': [n for n, _ in vfs.archives], 'ucs': 'Engine/Locale/{Polish,English,Russian}/Engine.ucs'}}
 
     for p, (layer, t) in load('attrib\\abilities\\').items():
@@ -253,15 +254,19 @@ def _build(args):
     for p, (layer, t) in load('attrib\\weapon\\').items():
         name = os.path.splitext(os.path.basename(p))[0]
         mn, mx = damage_of(t)
+        wc = t.get('cost', {}).get('cost', {}) if isinstance(t.get('cost'), dict) else {}  # cena ulepszenia broni
         cat['weapons'][name] = {**names(screen_name(t)), 'race': race_of(name), 'layer': layer,
-                                'damage': [round(mn, 1), round(mx, 1)], 'units': []}
+                                'damage': [round(mn, 1), round(mx, 1)], 'units': [],
+                                'cost': [round(float(wc.get('requisition', 0.0) or 0.0), 1),
+                                         round(float(wc.get('power', 0.0) or 0.0), 1)]}
     # badania (ulepszenia): nazwa, ikona, rasa, koszt (time_cost/cost – inaczej niż jednostki: cost_ext/time_cost/cost)
-    for p, (layer, t) in load('attrib\\research\\').items():
-        name = os.path.splitext(os.path.basename(p))[0]
-        c = t.get('time_cost', {}).get('cost', {}) if isinstance(t.get('time_cost'), dict) else {}
-        cat['research'][name] = {**names(screen_name(t)), 'icon': icon_name(t), 'race': race_of(name), 'layer': layer,
-                                 'cost': [round(float(c.get('requisition', 0.0) or 0.0), 1),
-                                          round(float(c.get('power', 0.0) or 0.0), 1)]}
+    for kind, prefix in (('research', 'attrib\\research\\'),):
+        for p, (layer, t) in load(prefix).items():
+            name = os.path.splitext(os.path.basename(p))[0]
+            c = t.get('time_cost', {}).get('cost', {}) if isinstance(t.get('time_cost'), dict) else {}
+            cat[kind][name] = {**names(screen_name(t)), 'icon': icon_name(t), 'race': race_of(name),
+                               'layer': layer, 'cost': [round(float(c.get('requisition', 0.0) or 0.0), 1),
+                                                        round(float(c.get('power', 0.0) or 0.0), 1)]}
     for kind, prefix in (('units', 'attrib\\ebps\\races\\'), ('squads', 'attrib\\sbps\\races\\')):
         for p, (layer, t) in load(prefix).items():
             parts = p.split('\\')
@@ -274,6 +279,14 @@ def _build(args):
             else:
                 entry['units'] = sorted(refs(t, 'ebps\\races\\' + parts[3] + '\\' + entry['category'])
                                         | {r.split('\\')[-1] for r in refs(t, 'ebps')})
+                # koszt uzupełnienia jednego modelu (squad_reinforce_ext/cost/cost) i typy liderów (squad_leader_ext/*/
+                # leader/type) – do liczenia faktycznie wydanych zasobów (zakup oddziału vs uzupełnienia)
+                rf = t.get('squad_reinforce_ext')
+                rc = rf.get('cost', {}).get('cost', {}) if isinstance(rf, dict) else {}
+                entry['reinforce'] = [round(float(rc.get('requisition', 0.0) or 0.0), 1),
+                                      round(float(rc.get('power', 0.0) or 0.0), 1)] if rc else None
+                entry['leaders'] = sorted({v.split('\\')[-1][:-4].lower() for path, v in walk(t.get('squad_leader_ext', {}))
+                                           if path[-1] == 'type' and isinstance(v, str) and v.endswith('.lua')})
             cat[kind][name] = entry
 
     # zdolności potomne (kolejne fazy jednej mocy) -> rodzic: z pola child_ability_name, a gdy go brak –

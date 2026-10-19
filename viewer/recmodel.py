@@ -7,13 +7,14 @@ import bisect
 import collections
 import json
 import os
+import re
 import time
 
 TPS_DEFAULT = 8
 from i18n import lang, t
 from paths import CATALOG_PATH
 
-CATALOG_VERSION = 5  # 2: nazwy pl/en/ru; 3: ikony; 4: ceny modeli; 5: badania; starszy katalog podgląd buduje od nowa
+CATALOG_VERSION = 6  # 2: nazwy pl/en/ru; 3: ikony; 4: ceny modeli; 5: badania; 6: uzupełnienia, liderzy, ceny broni; starszy katalog podgląd buduje od nowa
 ICONS_DIR = os.path.join(os.path.dirname(CATALOG_PATH), 'icons')
 ICON_SIZES = (20, 26, 32)  # jak catalog/icons.py
 
@@ -82,6 +83,22 @@ class Catalog:
         root = self.c['abilities'].get(v.get('root', ''), {})
         return next((i for i in (v.get('icon'), root.get('icon')) if i in have), None)
 
+    def squad_reinforce(self, sqbp):
+        """Koszt uzupełnienia jednego modelu oddziału (R, E) albo None."""
+        v = self.c.get('squads', {}).get((sqbp or '').lower())
+        c = v.get('reinforce') if v else None
+        return (c[0], c[1]) if c else None
+
+    def squad_leaders(self, sqbp):
+        v = self.c.get('squads', {}).get((sqbp or '').lower())
+        return set(v.get('leaders', [])) if v else set()
+
+    def weapon_cost(self, name):
+        """Cena ulepszenia broni (R, E); broń podstawowa ma (0, 0)."""
+        v = self.c.get('weapons', {}).get((name or '').lower())
+        c = v.get('cost') if v else None
+        return (c[0], c[1]) if c else (0.0, 0.0)
+
     def unit_cost(self, bp):
         """Cena modelu/budynku (rekwizycja, energia) z danych gry; bez ulepszeń broni oddziału. Nieznany -> (0, 0)."""
         v = self.c.get('units', {}).get((bp or '').lower())
@@ -92,6 +109,13 @@ class Catalog:
         """Nazwa badania (ulepszenia) w języku interfejsu."""
         return self._name('research', name)
 
+    ECO_RESEARCH = re.compile(r'(^|_)(power|requisition)_research(_\d)?$|_upgrade_(power|requisition)_\d$')
+
+    def is_eco_research(self, name):
+        """Badanie ekonomiczne (globalnie więcej rekwizycji/energii): *_requisition_research_N, *_power_research_N,
+        *_upgrade_requisition_N, *_upgrade_power_N – nie np. power_scythe / power_claws (ekwipunek)."""
+        return bool(self.ECO_RESEARCH.search((name or '').lower()))
+
     def research_icon(self, name):
         v = self.c.get('research', {}).get((name or '').lower())
         return v.get('icon') if v and v.get('icon') in self.c.get('icons', {}) else None
@@ -100,6 +124,10 @@ class Catalog:
         v = self.c.get('research', {}).get((name or '').lower())
         c = v.get('cost') if v else None
         return (c[0], c[1]) if c else (0.0, 0.0)
+
+    def is_unit(self, bp):
+        """Jednostka albo budynek rasy (attrib/ebps/races) – nie flagi punktów, plamy krwi, relikty itp."""
+        return (bp or '').lower() in self.c.get('units', {})
 
     def is_structure(self, bp):
         v = self.c.get('units', {}).get((bp or '').lower())
@@ -138,8 +166,12 @@ CATALOG = Catalog()
 
 def is_model(bp):
     """Czy encja to prawdziwy model/budynek. Ciała z Jamy Tortur Mrocznych Eldarów (dark_eldar_torture_pit_corpse,
-    oddział dark_eldar_squad_slave_murdered) gra też uśmierca – nie liczymy ich jako zabitych ani straconych modeli."""
-    return not (bp or '').endswith('_corpse')
+    oddział dark_eldar_squad_slave_murdered) gra też uśmierca – nie liczymy ich jako zabitych ani straconych modeli.
+    Tak samo encje pomocnicze spoza jednostek ras (attrib/ebps/races), np. dark_eldar_soulstorm (moc Burza Dusz),
+    dark_eldar_torture_amp_entity, tau_snare_trap (pułapka) – bez katalogu sprawdzamy tylko ciała."""
+    if (bp or '').endswith('_corpse'):
+        return False
+    return CATALOG.is_unit(bp) if CATALOG.c.get('units') else True
 
 
 def unit_key(eid, sq):
@@ -180,6 +212,16 @@ class Recording:
         self._last_growth = time.monotonic()  # kiedy plik ostatnio urósł (statystyki na żywo)
         self._live = _Acc(self)                # statystyki całego meczu liczone przyrostowo
         self._labels, self._label_state = {}, None
+        self.not_lost = set()      # budynki usunięte bez walki: przerwana budowa (zwrot zasobów), koniec meczu
+        # faktycznie wydane (rekord 'seen'): modele obecne w oddziale w ciągu INITIAL_S od jego pojawienia się = zakup
+        # oddziału (cena modelu z ebps), późniejsze = uzupełnienie (koszt uzupełnienia oddziału) albo lider (jego cena)
+        self.squad_first = {}      # id oddziału -> tick pojawienia się
+        self.model_value = {}      # id encji -> [R, E] wydane na model
+        self.seen_tick = {}        # id encji -> tick pierwszego rekordu 'seen'
+        self.weapon_paid = set()   # (encja, id broni) z ceną, już doliczone
+        self.army = {}             # pid -> lista (tick, {bp: liczba}) – wszystkie encje gracza (rekord 'army', przy zmianie)
+        self.first_seen = {}       # pid -> {bp: tick pierwszego pojawienia się} (kolejność budowy)
+        self.rel = {}              # (pid a, pid b) -> odpowiedzi World::QueryRelationship dla relacji 0..3 (rekord 'rel')
         self.research = {}         # pid -> lista (tick, nazwa badania) w kolejności ukończenia (rekord 'res')
         self.eco = {}              # pid -> lista (tick, rekwizycja, energia, dochód R/tick, dochód E/tick, zebrane R, zebrane E)
         self.pair_dmg = collections.Counter()  # (gracz atakujący, gracz ofiara) -> obrażenia (do ustalenia drużyn)
@@ -238,6 +280,17 @@ class Recording:
             u['ents'].add(r['id'])
         elif t == 'eco':
             self._add_eco(r)
+        elif t == 'seen':
+            self._add_seen(r)
+        elif t == 'army':
+            self.army.setdefault(r['pid'], []).append((r['tick'], r['n']))
+            seen = self.first_seen.setdefault(r['pid'], {})
+            for bp in r['n']:
+                seen.setdefault(bp, r['tick'])
+            self.max_tick = max(self.max_tick, r['tick'])
+        elif t == 'rel':
+            self.rel[(r['a'], r['b'])] = tuple(r['q'])
+            self._teams_n = -1
         elif t == 'res':
             self.research.setdefault(r['pid'], []).append((r['tick'], r['name']))
             self.max_tick = max(self.max_tick, r['tick'])
@@ -248,6 +301,22 @@ class Recording:
             tick = r['tick']
             if (t == 'dmg' and r['k']) or t == 'die':
                 self.death_tick.setdefault(r['v'], tick)
+            if t == 'dmg' and r['w'] >= 0 and (r['a'], r['w']) not in self.weapon_paid:
+                # broń z ceną (ulepszenie kupione dla oddziału) – doliczamy do wartości modelu, który jej użył.
+                # Ograniczenie: broń kupiona, ale nieużyta, nie jest widoczna.
+                wname = self.weapons.get(r['w'], ('',))[0]
+                wr, wp = CATALOG.weapon_cost(wname)
+                if wr or wp:
+                    self.weapon_paid.add((r['a'], r['w']))
+                    mv = self.model_value.setdefault(r['a'], list(CATALOG.unit_cost(self.ent_bp.get(r['a']))))
+                    mv[0] += wr
+                    mv[1] += wp
+            if t == 'die' and not r.get('by') and CATALOG.is_structure(self.ent_bp.get(r['v'])):
+                # budynek zniknął bez śmiertelnego trafienia (Death poza ApplyDamage): anulowana budowa (gra zwraca
+                # całość zasobów – często właśnie pod ostrzałem) albo usunięcie budynków pokonanego gracza. Budynki
+                # zniszczone w walce giną od dmg z k=1 (sprawdzone w nagraniach 2026-10-19). HP w chwili zgonu tego
+                # nie rozróżnia – anulowany generator Tau miał 0 HP.
+                self.not_lost.add(r['v'])
             self.max_tick = max(self.max_tick, tick)
             if t == 'dmg' and self._is_player_power(r):
                 # moc globalna gracza – osobny "oddział" ('powers', gracz), nie budynek HQ ani żaden oddział
@@ -297,12 +366,159 @@ class Recording:
             out.append((tick, round((side[0] - side[1]) * per_min, 1)))
         return out
 
+    def army_at(self, pid, tick=None):
+        """Skład gracza ({bp: liczba}) w chwili tick (None = najnowszy) albo None."""
+        s = self.army.get(pid)
+        if not s:
+            return None
+        if tick is None:
+            return s[-1][1]
+        i = bisect.bisect_right(s, tick, key=lambda x: x[0]) - 1
+        return s[i][1] if i >= 0 else None
+
+    def _bp_values(self, pid, tick):
+        """Średnia wydana wartość żywego modelu danego typu gracza w chwili tick (z rekordów 'seen'): {bp: (R, E)}."""
+        acc = collections.defaultdict(lambda: [0.0, 0.0, 0])
+        for eid, t0 in self.seen_tick.items():
+            if self.ent_pid.get(eid) != pid or (tick is not None and t0 > tick):
+                continue
+            dt = self.death_tick.get(eid)
+            if dt is not None and (tick is None or dt <= tick):
+                continue
+            v = self.unit_value(eid)
+            a = acc[self.ent_bp.get(eid)]
+            a[0] += v[0]
+            a[1] += v[1]
+            a[2] += 1
+        return {bp: (a[0] / a[2], a[1] / a[2]) for bp, a in acc.items() if a[2]}
+
+    def army_value(self, pid, tick=None):
+        """Wartość (rekwizycja, energia) żywych jednostek gracza i osobno jego budynków: ((R, E), (R, E)). Liczba
+        modeli z rekordu 'army'; wartość modelu = średnio wydane na żywe modele tego typu (zakup / uzupełnienie /
+        broń, rekordy 'seen'), a bez nich cena z ebps."""
+        units, builds = [0.0, 0.0], [0.0, 0.0]
+        per_bp = self._bp_values(pid, tick) if self.seen_tick else {}
+        for bp, n in (self.army_at(pid, tick) or {}).items():
+            req, pw = per_bp.get(bp) or CATALOG.unit_cost(bp)
+            dst = builds if CATALOG.is_structure(bp) else units
+            dst[0] += req * n
+            dst[1] += pw * n
+        return tuple(units), tuple(builds)
+
+    def army_advantage(self, teams, points=120):
+        """Przewaga wartości armii (R + E, bez budynków) drużyny 0 nad 1 w czasie: [(tick, wartość)]."""
+        ticks = sorted({x[0] for s in self.army.values() for x in s})
+        if not ticks:
+            return []
+        step = max(1, len(ticks) // points)
+        out = []
+        for tick in ticks[::step] + ([ticks[-1]] if (len(ticks) - 1) % step else []):
+            side = [sum(sum(self.army_value(p, tick)[0]) for p in team) for team in teams]
+            out.append((tick, round(side[0] - side[1], 1)))
+        return out
+
+    def build_order(self, pid):
+        """Kolejność budowy: [(tick, bp)] – typy jednostek/budynków w chwili pierwszego pojawienia się; to, co gracz
+        miał od startu (pierwszy rekord 'army'), pomijamy."""
+        s = self.army.get(pid)
+        if not s:
+            return []
+        start = set(s[0][1])
+        return sorted((tick, bp) for bp, tick in self.first_seen.get(pid, {}).items() if bp not in start)
+
+    def battles(self, bucket_s=10, top=6):
+        """Największe bitwy: odcinki po bucket_s sekund z obrażeniami >= 25% najmocniejszego odcinka (sąsiednie, z
+        przerwą najwyżej jednego odcinka, łączone). Dla każdej: (początek, koniec, [obrażenia drużyny 0, 1],
+        [stracone (R, E) drużyny 0, 1]). Zwraca top bitew wg obrażeń, ułożone w czasie."""
+        teams = self.teams()
+        side = {p: i for i, team in enumerate(teams) for p in team}
+        b = bucket_s * self.tps
+        dmg = collections.defaultdict(lambda: [0.0, 0.0])
+        lost = collections.defaultdict(lambda: [[0.0, 0.0], [0.0, 0.0]])
+        charged = set()
+        for tick, t, r in self.events:
+            if t == 'dmg' and not r['ff']:
+                sa = side.get(self.ent_pid.get(r['a']))
+                if sa is not None:
+                    dmg[tick // b][sa] += r['hp']
+            if ((t == 'dmg' and r['k']) or t == 'die') and r['v'] not in charged and r['v'] not in self.not_lost                     and is_model(self.ent_bp.get(r['v'])):
+                charged.add(r['v'])
+                sv = side.get(self.ent_pid.get(r['v']))
+                if sv is not None:
+                    req, pw = self.unit_value(r['v'])
+                    lost[tick // b][sv][0] += req
+                    lost[tick // b][sv][1] += pw
+        if not dmg:
+            return []
+        peak = max(sum(v) for v in dmg.values())
+        hot = sorted(k for k, v in dmg.items() if sum(v) >= 0.25 * peak)
+        groups = []
+        for k in hot:
+            if groups and k - groups[-1][-1] <= 2:
+                groups[-1].append(k)
+            else:
+                groups.append([k])
+        out = []
+        for g in groups:
+            ks = range(g[0], g[-1] + 1)
+            d = [sum(dmg[k][i] for k in ks) for i in (0, 1)]
+            l = [tuple(sum(lost[k][i][j] for k in ks) for j in (0, 1)) for i in (0, 1)]
+            out.append((g[0] * b, (g[-1] + 1) * b, d, l))
+        out = sorted(out, key=lambda x: -sum(x[2]))[:top]
+        return sorted(out)
+
+    def player_race(self, pid):
+        """Frakcja gracza (folder rasy z danych gry, np. 'tau') – rasa większości jego jednostek i budynków."""
+        n = len(self.ent_pid)
+        cache = self.__dict__.setdefault('_race_cache', {})
+        hit = cache.get(pid)
+        if hit and hit[0] == n:
+            return hit[1]
+        units = CATALOG.c.get('units', {})
+        votes = collections.Counter(units.get((self.ent_bp.get(e) or '').lower(), {}).get('race')
+                                    for e, p in self.ent_pid.items() if p == pid)
+        votes.pop(None, None)
+        votes.pop('npc', None)
+        race = votes.most_common(1)[0][0] if votes else None
+        cache[pid] = (n, race)
+        return race
+
+    def teams_from_game(self):
+        """Drużyny z gry (rekordy 'rel'): para graczy jest w jednej drużynie, gdy gra odpowiada dla niej tak samo jak
+        dla gracza z samym sobą (niezależne od tego, która wartość enum oznacza sojusz). Zwraca dwie listy albo None
+        (brak danych, inna liczba drużyn niż 2 – np. każdy na każdego)."""
+        own = next((q for (a, b), q in self.rel.items() if a == b), None)
+        pids = sorted(self.players)
+        if own is None or len(pids) < 2 or -1 in own:
+            return None
+        group = {p: p for p in pids}
+
+        def find(p):
+            while group[p] != p:
+                p = group[p]
+            return p
+        for a in pids:
+            for b in pids:
+                q = self.rel.get((a, b)) or self.rel.get((b, a))
+                if a < b and q is not None and q == own:
+                    group[find(b)] = find(a)
+        teams = collections.defaultdict(list)
+        for p in pids:
+            teams[find(p)].append(p)
+        if len(teams) != 2 or any((min(a, b), max(a, b)) not in self.rel for a in pids for b in pids if a < b):
+            return None
+        return sorted(teams.values())
+
     def teams(self):
-        """Dwie drużyny (listy pid). Rejestrator nie zna drużyn, więc wybieramy podział graczy, przy którym między
+        """Dwie drużyny (listy pid): z gry (teams_from_game), a gdy brak danych – heurystyka poniżej. Rejestrator nie zna drużyn, więc wybieramy podział graczy, przy którym między
         stronami poleciało najwięcej obrażeń (przypadkowe trafienia sojuszników są małe). Remis / brak walk: kolejność
         graczy – pierwsza połowa vs druga (tak było w powtórce 3v3 #47672736: 1000–1002 vs 1003–1005)."""
         if self._teams_n == len(self.events) and self._teams:
             return self._teams
+        game = self.teams_from_game()
+        if game:
+            self._teams, self._teams_n = game, len(self.events)
+            return game
         pids = sorted(self.players)
         half = set(pids[:len(pids) // 2])
         best, best_score = None, None
@@ -319,6 +535,29 @@ class Recording:
         self._teams = [[p for p in pids if p in best], [p for p in pids if p not in best]]
         self._teams_n = len(self.events)
         return self._teams
+
+    INITIAL_S = 2
+
+    def _add_seen(self, r):
+        eid, sq, bp = r['e'], r['sq'], r['bp']
+        tick = r['tick']
+        self.ent_bp.setdefault(eid, bp)
+        self.ent_pid.setdefault(eid, r['pid'])
+        self.seen_tick.setdefault(eid, tick)
+        self.max_tick = max(self.max_tick, tick)
+        if eid in self.model_value:
+            return  # wartość ustalona przy pierwszym pojawieniu się (przejście do innego oddziału jej nie zmienia)
+        cost = CATALOG.unit_cost(bp)
+        if sq:
+            first = self.squad_first.setdefault(sq, tick)
+            if tick - first > self.INITIAL_S * self.tps and bp.lower() not in CATALOG.squad_leaders(r['sqbp']):
+                cost = CATALOG.squad_reinforce(r['sqbp']) or cost  # uzupełnienie
+        self.model_value[eid] = list(cost)
+
+    def unit_value(self, eid):
+        """Wydane na model (R, E): zakup / uzupełnienie / lider + kupiona broń; bez danych 'seen' – cena z ebps."""
+        v = self.model_value.get(eid)
+        return tuple(v) if v else CATALOG.unit_cost(self.ent_bp.get(eid))
 
     def _is_player_power(self, r):
         """Obrażenia z mocy globalnej: zdolność oznaczona w katalogu jako global albo (zapas) trafienie bez broni,
@@ -431,7 +670,7 @@ class _Acc:
         if eid in self.charged:
             return
         self.charged.add(eid)
-        req, pw = CATALOG.unit_cost(self.rec.ent_bp.get(eid))
+        req, pw = self.rec.unit_value(eid)
         S = self.S
         S[vk]['lost_req'] += req
         S[vk]['lost_pow'] += pw
@@ -473,12 +712,13 @@ class _Acc:
                     self._charge(r['v'], vk, None if r['ff'] else ak)
             elif t == 'die':
                 vk = rec._key(r['v'], r['vs'])
-                model = is_model(rec.ent_bp.get(r['v']))
+                model = is_model(rec.ent_bp.get(r['v'])) and r['v'] not in rec.not_lost
                 S[vk]['lost'] += model
                 dot = last_dot_hit.get(r['v'])
                 if dot and tick - dot[0] <= dot_window:
                     S[dot[1]]['kills'] += model                   # zgon w trakcie obrażeń w czasie
-                self._charge(r['v'], vk, dot[1] if dot and tick - dot[0] <= dot_window else None)
+                if model:
+                    self._charge(r['v'], vk, dot[1] if dot and tick - dot[0] <= dot_window else None)
             elif t == 'hp':
                 vk = rec._key(r['v'], r['vs'])
                 dot = last_dot_hit.get(r['v'])

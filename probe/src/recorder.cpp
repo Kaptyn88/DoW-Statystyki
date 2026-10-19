@@ -15,12 +15,17 @@
 //   dmg    {tick, a, as, v, vs, w, hp, nom, k, ff}     – skuteczne ApplyDamage: atakujący/ofiara (id, oddział),
 //          broń (wid, -1 = bez WeaponInfo), hp = faktyczna strata HP, nom = nominalne obrażenia, k = zabity model ofiary,
 //          ff = friendly fire (ten sam gracz)
-//   die    {tick, v, vs, by}                           – zgon spoza ApplyDamage (by = 0) lub innej encji niż ofiara
+//   die    {tick, v, vs, by[, hp, fl]}                 – zgon spoza ApplyDamage (by = 0; hp = HP w chwili zgonu,
+//          fl = flaga Death) lub innej encji niż ofiara w trakcie ApplyDamage (by = atakujący, bez hp/fl)
 //   clock  {tick}                                      – co ~1 s czasu rzeczywistego: bieżący tick powtórki
 //   sel    {tick, sq:[id oddziałów], e:[id encji]}     – zaznaczenie gracza w grze (przy zmianie, odczyt co ~0,1 s)
 //   hp     {tick, v, vs, hp, src}                      – spadek HP poza ApplyDamage (atakujący nieznany; src = ścieżka kodu)
 //   eco    {tick, pid, req, pow, ir, ip}               – co ~1 s: stan rekwizycji/energii gracza i dochód na tick (DXP3)
 //   res    {tick, pid, name}                           – ukończone badanie (ulepszenie) gracza, nazwa pliku z attrib/research
+//   rel    {a, b, q:[r0..r3]}                          – World::QueryRelationship(a, b, r) dla r = 0..3 (1/0, -1 = błąd);
+//          raz na sesję i przy nowym graczu; para a==b tylko dla pierwszego gracza
+//   army   {tick, pid, n:{bp: liczba}}                 – wszystkie encje gracza wg blueprintu (co ~1 s, przy zmianie)
+//   seen   {tick, e, bp, sq, sqbp, pid}               – encja pierwszy raz w danym oddziale (zakup vs uzupełnienie)
 //   dmg bez broni (w=-1) ma dodatkowo src (ścieżka kodu), ab/abf (nazwa pliku i folder danych gry źródła, np.
 //          eldar_psychic_storm / abilities – hipoteza, zob. SourcePath) i abo (odległość ścieżki od r8, -1 = brak);
 //          gdy abo=-1: sw = ostatnia broń wręcz atakującego (heurystyka: atak specjalny wręcz)
@@ -38,6 +43,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <map>
+#include <string>
 #include "MinHook.h"
 
 // ---------------------------------------------------------------- stan globalny
@@ -92,6 +99,7 @@ static FnGetPtr pEntGetSquad, pEntGetOwner;
 static FnWorldTicks pWorldTicks;
 typedef void*          (*FnPlayerFromId)(void*, unsigned long);
 static FnPlayerFromId pPlayerFromId;   // World::GetPlayerFromID (sonda ekonomii: gracze od pierwszej sekundy)
+static FnGetPtr pPlayerEntities;      // Player::GetEntities (skład armii, rekord "army")
 static FnPlayerName pPlayerName;
 
 // oryginały (konwencja x64 MS, zob. sonda)
@@ -352,42 +360,107 @@ static void DescribePlayer(uintptr_t owner, unsigned long pid);
 // ---------------------------------------------------------------- ukończone badania (rekord "res")
 // SigmaPlayer::Load (DXP3 0x199d0a..) wczytuje tablice badań (std::vector<ResearchInfo*>) do pól +0x2a8 i +0x2c0
 // (+0x290 to inny loader – typy postawionych budynków). POTWIERDZONE 2026-10-19 (Battle Marshes, Orkowie): +0x2a8
-// rośnie w chwili UKOŃCZENIA badania, nazwa = *(char**)element: ork_research_grot_infiltrate tick 750 (1:33),
+// rośnie w chwili UKOŃCZENIA badania, nazwa = **element (zob. ResearchName): ork_research_grot_infiltrate tick 750 (1:33),
 // ork_research_eavy_armor_boyz 3137 (6:32), ork_research_burna 3377 (7:02) – zgodne z ekranem gry.
-static bool ResearchName(uintptr_t item, char* out, size_t cap)
+// Nazwa badania: element -> (wskaźnik) -> tekst. Sonda pokazała "+0x0->'nazwa'" (o jeden wskaźnik głębiej niż
+// *element) – pierwsza wersja czytała *element jako tekst i nie zapisała żadnego badania (poprawione 2026-10-19).
+// Wariant 1: **element (wskaźnik do char* / std::string z tekstem na stercie); wariant 2: tekst wprost w obiekcie
+// *element (krótki std::string MSVC, do 15 znaków, w buforze na +0).
+static bool IdentAt(uintptr_t p, char* out, size_t cap)
 {
-    uintptr_t p = 0;
-    if (!SafeReadPtr((void*)item, &p) || p < 0x10000) return false;
     __try {
         const unsigned char* s = (const unsigned char*)p;
         size_t i = 0;
         for (; i + 1 < cap && s[i]; ++i)
             if (!((s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= '0' && s[i] <= '9') || s[i] == '_'))
                 return false;
-        if (i < 3) return false;
+        if (i < 3 || (i + 1 >= cap && s[i])) return false;
         memcpy(out, s, i); out[i] = 0;
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
-// dopisuje do buf rekordy "res" dla badań ukończonych od poprzedniego wywołania (pole +0x2a8 gracza)
-static void ResearchRecords(unsigned long pid, uintptr_t obj, int tick, char* buf, size_t cap, size_t& len)
+static bool ResearchName(uintptr_t item, char* out, size_t cap)
 {
-    static std::unordered_map<uintptr_t, size_t> seen;  // obiekt gracza -> znana liczba ukończonych badań
+    uintptr_t str = 0, p = 0;
+    if (!SafeReadPtr((void*)item, &str) || str < 0x10000) return false;
+    if (SafeReadPtr((void*)str, &p) && p >= 0x10000 && IdentAt(p, out, cap)) return true;
+    return IdentAt(str, out, cap);
+}
+
+// surowe bajty elementu listy do logu (gdy nazwy nie da się odczytać – do ustalenia budowy elementu)
+static void LogRawItem(const char* kind, unsigned long pid, size_t idx, uintptr_t item)
+{
+    unsigned char b[0x40];
+    uintptr_t p = 0;
+    SafeReadPtr((void*)item, &p);
+    SafeCopy((void*)(p ? p : item), b, sizeof(b));
+    char hex[0x40 * 3 + 1]; size_t h = 0;
+    for (size_t i = 0; i < sizeof(b); ++i) h += _snprintf_s(hex + h, sizeof(hex) - h, _TRUNCATE, "%02x ", b[i]);
+    Log("LIST %s gracz %lu [%zu] element %p -> %p: %s\n", kind, pid, idx, (void*)item, (void*)p, hex);
+}
+
+// dopisuje do buf rekordy dla pozycji listy gracza (std::vector<Info*> pod obj+off) dodanych od poprzedniego
+// wywołania: +0x2a8 ukończone badania ("res"). (+0x308 = "AddOn Array" – dobudówki budynków, loader DXP3 0x19a6a0;
+// użytkownik nie chce ich w statystykach, więc nie zapisujemy.)
+static void ListRecords(const char* kind, unsigned off, unsigned long pid, uintptr_t obj, int tick, char* buf,
+                        size_t cap, size_t& len)
+{
+    static std::unordered_map<unsigned long long, size_t> seen;  // (obiekt gracza, pole) -> znana długość listy
+    static FILE* lastOut;                                        // nowa sesja (inna powtórka / od nowa) -> od zera
+    if (lastOut != g_out) { seen.clear(); lastOut = g_out; }
     uintptr_t beg = 0, end = 0;
-    if (!SafeReadPtr((void*)(obj + 0x2a8), &beg) || !SafeReadPtr((void*)(obj + 0x2b0), &end) || end < beg) return;
+    if (!SafeReadPtr((void*)(obj + off), &beg) || !SafeReadPtr((void*)(obj + off + 8), &end) || end < beg) return;
     size_t n = (end - beg) / 8;
     if (n > 512) return;
-    size_t& known = seen[obj];
+    size_t& known = seen[((unsigned long long)obj << 12) ^ off];
     for (size_t i = known; i < n; ++i) {
         uintptr_t item = 0;
         char name[96];
-        if (!SafeReadPtr((void*)(beg + i * 8), &item) || !item || !ResearchName(item, name, sizeof(name))) continue;
-        len += _snprintf_s(buf + len, cap - len, _TRUNCATE, "{\"t\":\"res\",\"tick\":%d,\"pid\":%lu,\"name\":\"%s\"}\n",
-                           tick, pid, name);
+        if (!SafeReadPtr((void*)(beg + i * 8), &item) || !item) continue;
+        if (!ResearchName(item, name, sizeof(name))) { LogRawItem(kind, pid, i, item); continue; }
+        len += _snprintf_s(buf + len, cap - len, _TRUNCATE, "{\"t\":\"%s\",\"tick\":%d,\"pid\":%lu,\"name\":\"%s\"}\n",
+                           kind, tick, pid, name);
     }
-    if (n < known) Log("RES gracz %lu: lista badan skrocila sie %zu -> %zu\n", pid, known, n);
+    if (n < known) Log("LIST %s gracz %lu: lista skrocila sie %zu -> %zu\n", kind, pid, known, n);
     known = n;
+}
+
+// ---------------------------------------------------------------- relacje graczy (rekord "rel")
+// World::QueryRelationship(Player*, Player*, PlayerRelationship) (SimEngine 0x9c780) woła wirtualną metodę świata
+// (vtable +0x40). W silniku WorldImp::IsPlayerRelationship zwraca po prostu (rel == 0) – drużyny podstawia mod.
+// Znaczenie wartości enum NIEPOTWIERDZONE (0 = wróg?), dlatego zapisujemy odpowiedzi dla 0..3 i rozstrzygamy
+// w podglądzie / na powtórce ze znanymi drużynami.
+typedef bool (*FnQueryRel)(const void*, const void*, const void*, int);
+static FnQueryRel pQueryRel;
+
+static int SafeQueryRel(uintptr_t world, uintptr_t a, uintptr_t b, int rel)
+{
+    __try { return pQueryRel((void*)world, (void*)a, (void*)b, rel) ? 1 : 0; }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return -1; }
+}
+
+// dopisuje rekordy "rel" dla par graczy, gdy w sesji pojawił się nowy gracz
+static void RelationRecords(const std::vector<std::pair<unsigned long, uintptr_t>>& players, char* buf, size_t cap,
+                            size_t& len)
+{
+    static FILE* lastOut;
+    static size_t lastCount;
+    uintptr_t w = 0;
+    if (!pQueryRel || !g_worldGlobal || !SafeReadPtr(g_worldGlobal, &w) || !w) return;
+    if (lastOut == g_out && players.size() <= lastCount) return;  // g_out czytany bez blokady – tylko porównanie
+    lastOut = g_out; lastCount = players.size();
+    for (size_t i = 0; i < players.size(); ++i)
+        for (size_t j = 0; j < players.size(); ++j) {
+            if (i == j && i) continue;  // relacja gracza z samym sobą tylko raz (dla pierwszego) – do rozpoznania wartości
+            const auto& a = players[i];
+            const auto& b = players[j];
+            if (i != j && a.first > b.first) continue;
+            int q[4];
+            for (int r = 0; r < 4; ++r) q[r] = SafeQueryRel(w, a.second, b.second, r);
+            len += _snprintf_s(buf + len, cap - len, _TRUNCATE,
+                               "{\"t\":\"rel\",\"a\":%lu,\"b\":%lu,\"q\":[%d,%d,%d,%d]}\n", a.first, b.first, q[0], q[1], q[2], q[3]);
+        }
 }
 
 static void EcoRecord(int tick)
@@ -396,20 +469,21 @@ static void EcoRecord(int tick)
     GatherPlayers(players);
     static std::unordered_map<uintptr_t, bool> sigma;  // obiekt -> czy to SigmaPlayer (sprawdzane raz)
     char line[2048]; size_t len = 0;
-    char res[2048]; size_t rlen = 0;
+    char res[4096]; size_t rlen = 0;
     std::vector<std::pair<unsigned long, uintptr_t>> ok;
     for (auto& [pid, obj] : players) {
         auto it = sigma.find(obj);
         bool isSigma = it != sigma.end() ? it->second : (sigma[obj] = RttiNameContains(obj, "SigmaPlayer"));
         float v[4];
         if (!isSigma || !ReadEco(obj, v)) continue;
-        ResearchRecords(pid, obj, tick, res, sizeof(res), rlen);
+        ListRecords("res", 0x2a8, pid, obj, tick, res, sizeof(res), rlen);
         len += _snprintf_s(line + len, sizeof(line) - len, _TRUNCATE,
                            "{\"t\":\"eco\",\"tick\":%d,\"pid\":%lu,\"req\":%.2f,\"pow\":%.2f,\"ir\":%.4f,\"ip\":%.4f}\n",
                            tick, pid, v[0], v[1], v[2], v[3]);
         ok.push_back({pid, obj});
     }
     if (!len) return;
+    if (!ok.empty()) RelationRecords(ok, res, sizeof(res), rlen);
     AcquireSRWLockExclusive(&g_lock);
     if (g_out) {
         for (auto& [pid, obj] : ok) DescribePlayer(obj, pid);  // nazwa gracza, który jeszcze nie walczył
@@ -566,7 +640,10 @@ static void hkSetHealth(void* self, float value)
     oSetHealth(self, value);
 }
 
-static void EmitDeath(uintptr_t ent, const Ent* by)
+// hp/fl tylko dla zgonu spoza ApplyDamage (hkDeath): HP encji w chwili zgonu i flaga wywołania Death – budynek
+// zniszczony powinien mieć ~0 HP, anulowana budowa (zwrot zasobów) / usunięcie po przegranej – HP > 0 (2026-10-19,
+// do potwierdzenia w grze)
+static void EmitDeath(uintptr_t ent, const Ent* by, float hp = -1.f, uint64_t flag = 0)
 {
     Ent v; QueryEnt((void*)ent, &v);
     int tick = GameTicks();
@@ -574,7 +651,11 @@ static void EmitDeath(uintptr_t ent, const Ent* by)
     EnsureSession(tick);
     DescribeEnt(v);
     if (by) DescribeEnt(*by);
-    Out("{\"t\":\"die\",\"tick\":%d,\"v\":%lu,\"vs\":%lu,\"by\":%lu}\n", tick, v.id, v.sq, by ? by->id : 0UL);
+    if (hp >= 0.f)
+        Out("{\"t\":\"die\",\"tick\":%d,\"v\":%lu,\"vs\":%lu,\"by\":%lu,\"hp\":%.1f,\"fl\":%llu}\n", tick, v.id, v.sq,
+            by ? by->id : 0UL, hp, (unsigned long long)flag);
+    else
+        Out("{\"t\":\"die\",\"tick\":%d,\"v\":%lu,\"vs\":%lu,\"by\":%lu}\n", tick, v.id, v.sq, by ? by->id : 0UL);
     ++g_cntDie;
     ReleaseSRWLockExclusive(&g_lock);
 }
@@ -585,7 +666,7 @@ static void hkDeath(void* self, uint64_t flag)
         LONG64 t0 = Qpc();
         uintptr_t ent = EntityFromHealthExt(self);
         if (t_app) { if (t_app->nDeaths < 4) t_app->deaths[t_app->nDeaths++] = ent; }
-        else if (ent) EmitDeath(ent, nullptr);
+        else if (ent) EmitDeath(ent, nullptr, ReadHealth(self), flag);
         PerfAdd(Qpc() - t0);
     }
     oDeath(self, flag);
@@ -775,8 +856,10 @@ static bool ResolveSimEngine()
     pPlayerName  = (FnPlayerName)GetProcAddress(s, "?GetName@Player@@QEBAPEB_WXZ");
     pEntGetSquad = (FnGetPtr)    GetProcAddress(s, "?GetSquad@Entity@@QEAAPEAVSquad@@XZ");
     pEntGetOwner = (FnGetPtr)    GetProcAddress(s, "?GetOwner@Entity@@QEAAPEAVPlayer@@XZ");
+    pPlayerEntities = (FnGetPtr) GetProcAddress(s, "?GetEntities@Player@@QEAAAEAVEntityGroup@@XZ");
     pWorldTicks  = (FnWorldTicks)GetProcAddress(s, "?GetGameTicks@World@@QEBAJXZ");
     pPlayerFromId = (FnPlayerFromId)GetProcAddress(s, "?GetPlayerFromID@World@@QEAAPEAVPlayer@@K@Z");
+    pQueryRel    = (FnQueryRel)  GetProcAddress(s, "?QueryRelationship@World@@QEBA_NPEBVPlayer@@0W4PlayerRelationship@1@@Z");
     return pEntGetBp && pSquadGetBp && pEntGetId && pSquadGetId && pEntGetSquad && pEntGetOwner && pWorldTicks;
 }
 
@@ -877,6 +960,91 @@ static bool ReadSelection(unsigned long* sq, int* nsq, unsigned long* en, int* n
         }
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) { *nsq = *nen = 0; return false; }
+}
+
+// ---------------------------------------------------------------- skład armii gracza (rekord "army")
+// Player::GetEntities (SimEngine) -> EntityGroup&; iterujemy jak zaznaczenie (EntityHolderGroup::begin/end).
+// NIEPOTWIERDZONE: pod którym przesunięciem w EntityGroup leży część EntityHolderGroup – sprawdzamy 0/8/0x10 i
+// wybieramy to, przy którym pierwsza encja należy do gracza (GetOwner) i ma nazwę blueprintu. Wynik w logu: "ARMY".
+static int g_armyOff = -1;  // wybrane przesunięcie (-1 = jeszcze nie ustalone, -2 = nie działa)
+
+static int ReadPlayerEntities(void* player, int off, void** out, int cap)
+{
+    __try {
+        char* grp = (char*)pPlayerEntities(player);
+        if (!grp) return 0;
+        void* const* b = pGrpBegin(grp + off);
+        void* const* e = pGrpEnd(grp + off);
+        if (!b || e < b || e - b > 20000) return -1;
+        int n = 0;
+        for (void* const* p = b; p < e && n < cap; ++p) if (*p) out[n++] = *p;
+        if (n && (pEntGetOwner(out[0]) != player || !pEntGetBp(out[0]))) return -1;
+        return n;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return -1; }
+}
+
+static const char* SafeEntBp(void* ent)
+{
+    __try { return pEntGetBp(ent); } __except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
+}
+
+static void ArmyRecords(int tick)
+{
+    if (!pPlayerEntities || !pGrpBegin || g_armyOff == -2) return;
+    std::vector<std::pair<unsigned long, uintptr_t>> players;
+    GatherPlayers(players);
+    static std::vector<void*> ents(8192);
+    static std::unordered_map<unsigned long, std::string> last;  // pid -> ostatnio zapisany skład
+    static std::unordered_map<unsigned long, unsigned long> entSq;  // encja -> oddział (rekord "seen" przy zmianie)
+    static FILE* lastOut;
+    if (lastOut != g_out) { last.clear(); entSq.clear(); lastOut = g_out; }
+    std::string recs;
+    for (auto& [pid, obj] : players) {
+        int n = -1;
+        if (g_armyOff < 0) {
+            for (int off : {0, 8, 0x10}) {
+                n = ReadPlayerEntities((void*)obj, off, ents.data(), (int)ents.size());
+                if (n > 0) { g_armyOff = off; Log("ARMY przesuniecie EntityGroup = 0x%x (gracz %lu, encji %d)\n", off, pid, n); break; }
+            }
+            if (g_armyOff < 0) continue;
+        } else n = ReadPlayerEntities((void*)obj, g_armyOff, ents.data(), (int)ents.size());
+        if (n < 0) continue;
+        std::map<std::string, int> count;
+        for (int i = 0; i < n; ++i) {
+            Ent e; QueryEnt(ents[i], &e);
+            if (!e.ok) continue;
+            char safe[96], sqsafe[96];
+            SafeJsonStr(e.bp, safe, sizeof(safe));
+            if (safe[0]) ++count[safe];
+            // "seen": encja pierwszy raz (albo w innym oddziale) – podgląd odróżnia modele z zakupu oddziału od
+            // uzupełnień (dołączyły później) i liczy faktycznie wydane zasoby
+            auto it = entSq.find(e.id);
+            if (it == entSq.end() || it->second != e.sq) {
+                entSq[e.id] = e.sq;
+                SafeJsonStr(e.sqbp, sqsafe, sizeof(sqsafe));
+                char item[320];
+                _snprintf_s(item, sizeof(item), _TRUNCATE,
+                            "{\"t\":\"seen\",\"tick\":%d,\"e\":%lu,\"bp\":\"%s\",\"sq\":%lu,\"sqbp\":\"%s\",\"pid\":%lu}\n",
+                            tick, e.id, safe, e.sq, sqsafe, pid);
+                recs += item;
+            }
+        }
+        std::string body;
+        for (auto& [bp, c] : count) {
+            char item[128];
+            _snprintf_s(item, sizeof(item), _TRUNCATE, "%s\"%s\":%d", body.empty() ? "" : ",", bp.c_str(), c);
+            body += item;
+        }
+        if (last[pid] == body) continue;  // bez zmian – nie zapisujemy
+        last[pid] = body;
+        char head[96];
+        _snprintf_s(head, sizeof(head), _TRUNCATE, "{\"t\":\"army\",\"tick\":%d,\"pid\":%lu,\"n\":{", tick, pid);
+        recs += head; recs += body; recs += "}}\n";
+    }
+    if (recs.empty()) return;
+    AcquireSRWLockExclusive(&g_lock);
+    if (g_out) Out("%s", recs.c_str());
+    ReleaseSRWLockExclusive(&g_lock);
 }
 
 // wołane co ~0,1 s z wątku roboczego; rekord "sel" tylko przy zmianie (i na początku każdej sesji)
@@ -982,6 +1150,7 @@ static DWORD WINAPI InitThread(LPVOID)
             if (g_out) fflush(g_out);
             ReleaseSRWLockExclusive(&g_lock);
             if (running) EcoRecord(tick);                            // ekonomia graczy: co 1 s
+            if (running) ArmyRecords(tick);                          // skład armii: co 1 s, tylko przy zmianie
             if (g_eco && running && iter % 50 == 0) EcoDump(tick);  // sonda ekonomii: co 5 s
             AcquireSRWLockExclusive(&g_logLock);
             if (g_log) fflush(g_log);
