@@ -467,6 +467,16 @@ nakładka podsumowania z zakładkami.
 - WYDANIE v2.0 (2026-10-19): commit 631f383, tag v2.0 wypchnięty, paczka dist/DoW-Statystyki-v2.0.zip (13 MB);
   sprawdzone: launcher --check, Podglad.exe z paczki sam buduje katalog v7 (656 ikon, w tym .rtx).
   Uruchamianie przez Steam (podpięcie do gry uruchomionej przez Steam) przesunięte do v2.1.
+- Skróty: Shift+F8 = poprzednia zakładka (domyślnie), opcjonalne skróty do każdej zakładki (key_tabs, domyślnie
+  brak, sekcja zwinięta w ustawieniach); hotkeys.py obsługuje Shift+/Ctrl+ (MOD_SHIFT/MOD_CONTROL).
+- NIEROZWIĄZANE (na v2.1): kliknięcie w ODBLOKOWANĄ nakładkę PODSUMOWANIA na chwilę zatrzymuje grę (nakładka
+  oddziału – nie). Poprawka WM_MOUSEACTIVATE -> MA_NOACTIVATE (podmiana procedury okna, overlay._no_activate_on_click)
+  potwierdzona komunikatem (SendMessage zwraca 3), ale w grze nie pomogła. Do zbadania: co robi klik w podsumowaniu
+  (pasek zakładek -> _set_tab: s.save() zapis pliku + pełne przerysowanie; kółko; przeciąganie geometry()), czy gra
+  staje przez utratę fokusu (sprawdzić GetForegroundWindow przed/po kliknięciu) czy przez coś innego; zablokowana
+  nakładka (WS_EX_TRANSPARENT) problemu nie ma. Uruchamianie przez Steam – też v2.1.
+- NIEPRZETESTOWANE przed v2.0 (użytkownik zdecydował wydać): pełny przebieg z paczki przez Start.bat oraz
+  wyłączanie się rejestratora w potyczce na żywo po zmianach v2.0 (kod: nowe rekordy tylko gdy g_armed).
 - WYCOFANE na prośbę użytkownika: stały rozmiar okna podsumowania (sum_w/sum_h) – okno znów dopasowuje się do treści.
 - ULEPSZENIA (badania) – ustalenia 2026-10-19:
   - SimEngine nie ma nic o badaniach; wszystko w DXP3Mod (napisy: "Research not found while loading Research Array

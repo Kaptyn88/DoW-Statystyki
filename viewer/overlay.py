@@ -48,6 +48,8 @@ class OverlaySettings:
     key_unit: str = 'F6'          # skróty: pokaż/ukryj nakładkę oddziału, podsumowanie, następna zakładka ('' = brak)
     key_summary: str = 'F7'
     key_tab: str = 'F8'
+    key_tab_prev: str = 'Shift+F8'  # poprzednia zakładka
+    key_tabs: dict = field(default_factory=dict)  # opcjonalnie: zakładka -> klawisz (domyślnie brak)
     count: int = 3
     sort_by: str = 'dealt'
     mode: str = MODE_ALL          # MODE_ALL, MODE_EACH albo nazwa gracza
@@ -746,7 +748,10 @@ class Overlays:
         self.apply_hotkeys()
 
     def apply_hotkeys(self):
-        self.hotkeys.set({'unit': self.s.key_unit, 'summary': self.s.key_summary, 'tab': self.s.key_tab})
+        keys = {'unit': self.s.key_unit, 'summary': self.s.key_summary, 'tab': self.s.key_tab,
+                'tab_prev': self.s.key_tab_prev}
+        keys.update({'tab:' + name: key for name, key in self.s.key_tabs.items() if key})
+        self.hotkeys.set(keys)
         return self.hotkeys.failed
 
     def changed(self, rec):
@@ -787,13 +792,17 @@ class Overlays:
                 self.s.enabled = not self.s.enabled
             elif a == 'summary':
                 self.s.sum_enabled = not self.s.sum_enabled
-            elif a == 'tab':
+            elif a in ('tab', 'tab_prev'):
                 if not self.s.sum_enabled:
                     self.s.sum_enabled = True
                 else:
                     tabs = visible_tabs(self.s)
                     i = tabs.index(current_tab(self.s))
-                    self.s.sum_tab = tabs[(i + 1) % len(tabs)]
+                    self.s.sum_tab = tabs[(i + (1 if a == 'tab' else -1)) % len(tabs)]
+            elif a.startswith('tab:'):  # skrót do konkretnej zakładki – pokazuje podsumowanie na tej zakładce
+                self.s.sum_enabled = True
+                if a[4:] in visible_tabs(self.s):
+                    self.s.sum_tab = a[4:]
         if acts:
             self.s.save()
             self.changed(rec)
@@ -890,9 +899,30 @@ class OverlaySettingsWindow(tk.Toplevel):
 
         section(t('set_sec_keys'))
         none = t('key_none')
-        for key, text in (('key_unit', t('key_unit')), ('key_summary', t('key_summary')), ('key_tab', t('key_tab'))):
+        for key, text in (('key_unit', t('key_unit')), ('key_summary', t('key_summary')), ('key_tab', t('key_tab')),
+                          ('key_tab_prev', t('key_tab_prev'))):
             self.v[key] = tk.StringVar(value=getattr(settings, key) or none)
-            row(text, self._combo(f, self.v[key], [none] + KEYS, width=8, command=self._apply_keys))
+            row(text, self._combo(f, self.v[key], [none] + KEYS, width=10, command=self._apply_keys))
+        # opcjonalne skróty do konkretnych zakładek (domyślnie brak) – zwinięte, żeby nie wydłużać okna
+        self.tab_keys = {name: tk.StringVar(value=settings.key_tabs.get(name) or none) for name in SUMMARY_TABS}
+        more = ttk.Frame(f)
+        self.more_var = tk.BooleanVar(value=any(settings.key_tabs.values()))
+
+        def toggle_more():
+            if self.more_var.get():
+                more.grid(row=more_row, column=0, columnspan=2, sticky='we')
+            else:
+                more.grid_remove()
+        ttk.Checkbutton(f, text=t('key_tabs_more'), variable=self.more_var, command=toggle_more).grid(
+            row=r, column=0, columnspan=2, sticky='w', pady=(4, 0))
+        r += 1
+        more_row = r
+        r += 1
+        for i, name in enumerate(SUMMARY_TABS):
+            ttk.Label(more, text=t('key_tab_to', tab=t('tab_' + name))).grid(row=i, column=0, sticky='w', padx=(16, 10))
+            self._combo(more, self.tab_keys[name], [none] + KEYS, width=10, command=self._apply_keys).grid(
+                row=i, column=1, sticky='w', pady=1)
+        toggle_more()
         self.key_status = ttk.Label(f, text='', foreground='#a33')
         self.key_status.grid(row=r, column=0, columnspan=2, sticky='w')
         r += 1
@@ -915,9 +945,10 @@ class OverlaySettingsWindow(tk.Toplevel):
         self.key_status.configure(text=t('key_busy', keys=', '.join(failed)) if failed else '')
 
     def _apply_keys(self):
-        for key in ('key_unit', 'key_summary', 'key_tab'):
+        for key in ('key_unit', 'key_summary', 'key_tab', 'key_tab_prev'):
             val = self.v[key].get()
             setattr(self.s, key, val if val in KEYS else '')
+        self.s.key_tabs = {name: var.get() for name, var in self.tab_keys.items() if var.get() in KEYS}
         self.s.save()
         self._show_key_status(self.apply_hotkeys())
 

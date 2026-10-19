@@ -62,7 +62,8 @@ Są dwie nakładki, każdą ustawiasz osobno (przycisk "Nakładka…" w Podgląd
                (budynki na złoto); przewijanie kółkiem myszy, gdy nakładka jest odblokowana.
   Bitwy      – aktualna wartość armii, wykres przewagi wartości armii i największe bitwy.
 Skróty klawiszowe (działają w grze, do zmiany w ustawieniach):
-  F6 – pokaż/ukryj nakładkę oddziału, F7 – pokaż/ukryj podsumowanie, F8 – następna zakładka.
+  F6 – pokaż/ukryj nakładkę oddziału, F7 – pokaż/ukryj podsumowanie, F8 – następna zakładka,
+  Shift+F8 – poprzednia zakładka. Opcjonalnie można przypisać skrót do każdej zakładki.
 Przeciągnij nakładkę myszą w wygodne miejsce i zaznacz "Zablokuj nakładkę" – wtedy kliknięcia
 przechodzą przez nią do gry. Działa w trybie okna bez ramki (domyślny w DE).
 

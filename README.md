@@ -22,7 +22,7 @@ Wymagania: Windows 10/11 64-bit, DoW: Definitive Edition ze Steam (wersja 2.10.3
 - **Nakładka oddziału** – oddział zaznaczony w grze: obrażenia, zabite i stracone modele, zniszczona i stracona
   wartość. **Nakładka podsumowania** – zakładki poniżej (pojedyncze zakładki można wyłączyć w ustawieniach).
 - Skróty (działają w grze, do zmiany w Nakładka…): **F6** pokaż/ukryj nakładkę oddziału, **F7** pokaż/ukryj
-  podsumowanie, **F8** następna zakładka.
+  podsumowanie, **F8** następna zakładka, **Shift+F8** poprzednia (opcjonalnie skrót do każdej zakładki).
 - **R** – rekwizycja, **E** – energia.
 - **Armia** – drużyna po lewej, drużyna po prawej; gracz z frakcją i jego najlepsze oddziały w całym meczu.
 - **Straty** – stracone modele i budynki z ikonami oraz ich wartość. Wartość to **faktycznie wydane** zasoby:
@@ -48,7 +48,7 @@ game shows its numbers. Download the zip from **[Releases](../../releases)**, ex
 in the game: Replays → choose a replay → Play. Details: `INSTRUCTIONS_EN.txt`. Works only while watching replays;
 game files are not modified.
 
-Summary overlay tabs (F7 show/hide, F8 next tab, F6 squad overlay): Army, Losses, Economy, Upgrades, Build order,
+Summary overlay tabs (F7 show/hide, F8 next tab, Shift+F8 previous tab, F6 squad overlay): Army, Losses, Economy, Upgrades, Build order,
 Battles. R = requisition, P = power. Losses and army value count **resources actually spent**: models bought with
 the squad at model cost, later ones at reinforcement cost, leaders at their own cost, plus paid weapons the model
 used; cancelled construction (refunded) and buildings removed after defeat are not losses. Army value = living
@@ -63,7 +63,7 @@ units without buildings. Battles = periods with the most damage (bold = smaller 
 затем в игре: Реплеи → выберите реплей → Воспроизвести. Подробности: `INSTRUKCIYA_RU.txt`. Работает только при
 просмотре реплеев; файлы игры не изменяются.
 
-Вкладки сводки (F7 показать/скрыть, F8 следующая вкладка, F6 оверлей отряда): Армия, Потери, Экономика, Улучшения,
+Вкладки сводки (F7 показать/скрыть, F8 следующая вкладка, Shift+F8 предыдущая, F6 оверлей отряда): Армия, Потери, Экономика, Улучшения,
 Порядок стройки, Битвы. Р – реквизиция, Э – энергия. Потери и стоимость армии считаются как **фактически
 потраченные** ресурсы: модели, купленные с отрядом, – по цене модели, добавленные позже – по цене пополнения,
 лидеры – по своей цене, плюс использованное платное оружие; отменённая стройка (ресурсы возвращаются) и здания,
