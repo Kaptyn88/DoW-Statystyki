@@ -13,7 +13,7 @@ TPS_DEFAULT = 8
 from i18n import lang, t
 from paths import CATALOG_PATH
 
-CATALOG_VERSION = 4  # 2: nazwy pl/en/ru; 3: ikony; 4: ceny modeli; starszy katalog podgląd buduje od nowa
+CATALOG_VERSION = 5  # 2: nazwy pl/en/ru; 3: ikony; 4: ceny modeli; 5: badania; starszy katalog podgląd buduje od nowa
 ICONS_DIR = os.path.join(os.path.dirname(CATALOG_PATH), 'icons')
 ICON_SIZES = (20, 26, 32)  # jak catalog/icons.py
 
@@ -85,6 +85,19 @@ class Catalog:
     def unit_cost(self, bp):
         """Cena modelu/budynku (rekwizycja, energia) z danych gry; bez ulepszeń broni oddziału. Nieznany -> (0, 0)."""
         v = self.c.get('units', {}).get((bp or '').lower())
+        c = v.get('cost') if v else None
+        return (c[0], c[1]) if c else (0.0, 0.0)
+
+    def research(self, name):
+        """Nazwa badania (ulepszenia) w języku interfejsu."""
+        return self._name('research', name)
+
+    def research_icon(self, name):
+        v = self.c.get('research', {}).get((name or '').lower())
+        return v.get('icon') if v and v.get('icon') in self.c.get('icons', {}) else None
+
+    def research_cost(self, name):
+        v = self.c.get('research', {}).get((name or '').lower())
         c = v.get('cost') if v else None
         return (c[0], c[1]) if c else (0.0, 0.0)
 
@@ -167,6 +180,8 @@ class Recording:
         self._last_growth = time.monotonic()  # kiedy plik ostatnio urósł (statystyki na żywo)
         self._live = _Acc(self)                # statystyki całego meczu liczone przyrostowo
         self._labels, self._label_state = {}, None
+        self.research = {}         # pid -> lista (tick, nazwa badania) w kolejności ukończenia (rekord 'res')
+        self.eco = {}              # pid -> lista (tick, rekwizycja, energia, dochód R/tick, dochód E/tick, zebrane R, zebrane E)
         self.pair_dmg = collections.Counter()  # (gracz atakujący, gracz ofiara) -> obrażenia (do ustalenia drużyn)
         self._teams, self._teams_n = None, -1
         self.poll()
@@ -221,6 +236,11 @@ class Recording:
             # first: przybliżony czas pojawienia się (ostatni znany tick; rekord 'ent' poprzedza pierwsze zdarzenie oddziału)
             u = self.units.setdefault(k, {'bp': r['sqbp'] or r['bp'], 'pid': r['pid'], 'ents': set(), 'first': self.max_tick})
             u['ents'].add(r['id'])
+        elif t == 'eco':
+            self._add_eco(r)
+        elif t == 'res':
+            self.research.setdefault(r['pid'], []).append((r['tick'], r['name']))
+            self.max_tick = max(self.max_tick, r['tick'])
         elif t == 'sel':
             self.selection = [('sq', q) for q in r.get('sq', [])] + [('ent', e) for e in r.get('e', [])]
             self.selection_seq += 1
@@ -242,6 +262,40 @@ class Recording:
             if t != 'clock':
                 self.events.append((tick, t, r))
                 self.ticks.append(tick)
+
+    def _add_eco(self, r):
+        """Rekord ekonomii (co ~1 s): zebrane łącznie = suma dochodu w czasie (gra nie trzyma takiego licznika;
+        dochód na tick między próbkami przyjmujemy jak w poprzedniej próbce)."""
+        s = self.eco.setdefault(r['pid'], [])
+        tick = r['tick']
+        if s and tick < s[-1][0]:
+            return  # cofnięcie czasu w tej samej sesji – ignorujemy
+        cr, cp = (s[-1][5] + s[-1][3] * (tick - s[-1][0]), s[-1][6] + s[-1][4] * (tick - s[-1][0])) if s else (0.0, 0.0)
+        s.append((tick, r['req'], r['pow'], r['ir'], r['ip'], cr, cp))
+        self.max_tick = max(self.max_tick, tick)
+
+    def eco_at(self, pid, tick=None):
+        """Ostatnia próbka ekonomii gracza do ticku (None = najnowsza) albo None."""
+        s = self.eco.get(pid)
+        if not s:
+            return None
+        if tick is None:
+            return s[-1]
+        i = bisect.bisect_right(s, (tick, float('inf'))) - 1
+        return s[i] if i >= 0 else None
+
+    def income_advantage(self, teams, which, points=120):
+        """Przewaga dochodu drużyny 0 nad 1 na minutę w czasie: [(tick, wartość)]; which = 3 (rekwizycja) / 4 (energia)."""
+        ticks = sorted({e[0] for s in self.eco.values() for e in s})
+        if not ticks:
+            return []
+        step = max(1, len(ticks) // points)
+        out = []
+        per_min = 60 * self.tps
+        for tick in ticks[::step] + ([ticks[-1]] if (len(ticks) - 1) % step else []):
+            side = [sum((self.eco_at(p, tick) or (0,) * 7)[which] for p in team) for team in teams]
+            out.append((tick, round((side[0] - side[1]) * per_min, 1)))
+        return out
 
     def teams(self):
         """Dwie drużyny (listy pid). Rejestrator nie zna drużyn, więc wybieramy podział graczy, przy którym między

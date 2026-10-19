@@ -19,6 +19,8 @@
 //   clock  {tick}                                      – co ~1 s czasu rzeczywistego: bieżący tick powtórki
 //   sel    {tick, sq:[id oddziałów], e:[id encji]}     – zaznaczenie gracza w grze (przy zmianie, odczyt co ~0,1 s)
 //   hp     {tick, v, vs, hp, src}                      – spadek HP poza ApplyDamage (atakujący nieznany; src = ścieżka kodu)
+//   eco    {tick, pid, req, pow, ir, ip}               – co ~1 s: stan rekwizycji/energii gracza i dochód na tick (DXP3)
+//   res    {tick, pid, name}                           – ukończone badanie (ulepszenie) gracza, nazwa pliku z attrib/research
 //   dmg bez broni (w=-1) ma dodatkowo src (ścieżka kodu), ab/abf (nazwa pliku i folder danych gry źródła, np.
 //          eldar_psychic_storm / abilities – hipoteza, zob. SourcePath) i abo (odległość ścieżki od r8, -1 = brak);
 //          gdy abo=-1: sw = ostatnia broń wręcz atakującego (heurystyka: atak specjalny wręcz)
@@ -273,14 +275,13 @@ static void* SafePlayerFromId(uintptr_t world, unsigned long id)
     __try { return pPlayerFromId((void*)world, id); } __except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
 }
 
-static void EcoDump(int tick)
+// gracze z sesji (z walk/zaznaczenia) + ze świata (ID 1000..1007), także ci, którzy jeszcze nie walczyli
+static void GatherPlayers(std::vector<std::pair<unsigned long, uintptr_t>>& players)
 {
-    if (!g_eco || tick <= 0) return;
-    std::vector<std::pair<unsigned long, uintptr_t>> players;
     AcquireSRWLockExclusive(&g_lock);
     players.assign(g_playerObj->begin(), g_playerObj->end());
     ReleaseSRWLockExclusive(&g_lock);
-    uintptr_t w = 0;  // gracze ze świata (ID 1000..1007), także ci, którzy jeszcze nie walczyli
+    uintptr_t w = 0;
     if (pPlayerFromId && g_worldGlobal && SafeReadPtr(g_worldGlobal, &w) && w)
         for (unsigned long id = 1000; id < 1008; ++id) {
             void* pl = SafePlayerFromId(w, id);
@@ -288,6 +289,13 @@ static void EcoDump(int tick)
             for (auto& q : players) known |= q.first == id;
             if (pl && !known) players.push_back({id, (uintptr_t)pl});
         }
+}
+
+static void EcoDump(int tick)
+{
+    if (!g_eco || tick <= 0) return;
+    std::vector<std::pair<unsigned long, uintptr_t>> players;
+    GatherPlayers(players);
     static std::unordered_set<unsigned long> named;
     static std::vector<unsigned char> buf(kEcoObj), sub(kEcoSub);
     for (auto& [pid, obj] : players) {
@@ -311,6 +319,104 @@ static void EcoDump(int tick)
         }
     }
     fflush(g_eco);
+}
+
+// ---------------------------------------------------------------- ekonomia (rekord "eco" co 1 s)
+// Ustalone sondą (NOTES.md, 2026-10-19): obiekt gracza = SigmaPlayer (DXP3Mod), float +0x3f8 rekwizycja,
+// +0x3fc energia (stan konta), +0x410 / +0x414 dochód rekwizycji / energii na tick. Inna klasa (inny mod, wersja
+// gry) -> nie zapisujemy nic, zamiast zapisywać śmieci.
+static bool RttiNameContains(uintptr_t obj, const char* what)
+{
+    uintptr_t vt = 0, col = 0;
+    if (!SafeReadPtr((void*)obj, &vt) || !SafeReadPtr((void*)(vt - 8), &col)) return false;
+    __try {
+        const unsigned* c = (const unsigned*)col;
+        const char* name = (const char*)(col - c[5] + c[3] + 0x10);
+        return strstr(name, what) != nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+static bool ReadEco(uintptr_t obj, float out[4])
+{
+    __try {
+        const char* b = (const char*)obj;
+        out[0] = *(const float*)(b + 0x3f8); out[1] = *(const float*)(b + 0x3fc);
+        out[2] = *(const float*)(b + 0x410); out[3] = *(const float*)(b + 0x414);
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    for (int i = 0; i < 4; ++i) if (!(out[i] >= 0.0f && out[i] < 1e7f)) return false;  // NaN / śmieci
+    return true;
+}
+
+static void DescribePlayer(uintptr_t owner, unsigned long pid);
+
+// ---------------------------------------------------------------- ukończone badania (rekord "res")
+// SigmaPlayer::Load (DXP3 0x199d0a..) wczytuje tablice badań (std::vector<ResearchInfo*>) do pól +0x2a8 i +0x2c0
+// (+0x290 to inny loader – typy postawionych budynków). POTWIERDZONE 2026-10-19 (Battle Marshes, Orkowie): +0x2a8
+// rośnie w chwili UKOŃCZENIA badania, nazwa = *(char**)element: ork_research_grot_infiltrate tick 750 (1:33),
+// ork_research_eavy_armor_boyz 3137 (6:32), ork_research_burna 3377 (7:02) – zgodne z ekranem gry.
+static bool ResearchName(uintptr_t item, char* out, size_t cap)
+{
+    uintptr_t p = 0;
+    if (!SafeReadPtr((void*)item, &p) || p < 0x10000) return false;
+    __try {
+        const unsigned char* s = (const unsigned char*)p;
+        size_t i = 0;
+        for (; i + 1 < cap && s[i]; ++i)
+            if (!((s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= '0' && s[i] <= '9') || s[i] == '_'))
+                return false;
+        if (i < 3) return false;
+        memcpy(out, s, i); out[i] = 0;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+// dopisuje do buf rekordy "res" dla badań ukończonych od poprzedniego wywołania (pole +0x2a8 gracza)
+static void ResearchRecords(unsigned long pid, uintptr_t obj, int tick, char* buf, size_t cap, size_t& len)
+{
+    static std::unordered_map<uintptr_t, size_t> seen;  // obiekt gracza -> znana liczba ukończonych badań
+    uintptr_t beg = 0, end = 0;
+    if (!SafeReadPtr((void*)(obj + 0x2a8), &beg) || !SafeReadPtr((void*)(obj + 0x2b0), &end) || end < beg) return;
+    size_t n = (end - beg) / 8;
+    if (n > 512) return;
+    size_t& known = seen[obj];
+    for (size_t i = known; i < n; ++i) {
+        uintptr_t item = 0;
+        char name[96];
+        if (!SafeReadPtr((void*)(beg + i * 8), &item) || !item || !ResearchName(item, name, sizeof(name))) continue;
+        len += _snprintf_s(buf + len, cap - len, _TRUNCATE, "{\"t\":\"res\",\"tick\":%d,\"pid\":%lu,\"name\":\"%s\"}\n",
+                           tick, pid, name);
+    }
+    if (n < known) Log("RES gracz %lu: lista badan skrocila sie %zu -> %zu\n", pid, known, n);
+    known = n;
+}
+
+static void EcoRecord(int tick)
+{
+    std::vector<std::pair<unsigned long, uintptr_t>> players;
+    GatherPlayers(players);
+    static std::unordered_map<uintptr_t, bool> sigma;  // obiekt -> czy to SigmaPlayer (sprawdzane raz)
+    char line[2048]; size_t len = 0;
+    char res[2048]; size_t rlen = 0;
+    std::vector<std::pair<unsigned long, uintptr_t>> ok;
+    for (auto& [pid, obj] : players) {
+        auto it = sigma.find(obj);
+        bool isSigma = it != sigma.end() ? it->second : (sigma[obj] = RttiNameContains(obj, "SigmaPlayer"));
+        float v[4];
+        if (!isSigma || !ReadEco(obj, v)) continue;
+        ResearchRecords(pid, obj, tick, res, sizeof(res), rlen);
+        len += _snprintf_s(line + len, sizeof(line) - len, _TRUNCATE,
+                           "{\"t\":\"eco\",\"tick\":%d,\"pid\":%lu,\"req\":%.2f,\"pow\":%.2f,\"ir\":%.4f,\"ip\":%.4f}\n",
+                           tick, pid, v[0], v[1], v[2], v[3]);
+        ok.push_back({pid, obj});
+    }
+    if (!len) return;
+    AcquireSRWLockExclusive(&g_lock);
+    if (g_out) {
+        for (auto& [pid, obj] : ok) DescribePlayer(obj, pid);  // nazwa gracza, który jeszcze nie walczył
+        Out("%s", line);
+        if (rlen) Out("%s", res);
+    }
+    ReleaseSRWLockExclusive(&g_lock);
 }
 
 static void DescribePlayer(uintptr_t owner, unsigned long pid)
@@ -875,6 +981,7 @@ static DWORD WINAPI InitThread(LPVOID)
             if (g_out && running) Out("{\"t\":\"clock\",\"tick\":%d}\n", tick);
             if (g_out) fflush(g_out);
             ReleaseSRWLockExclusive(&g_lock);
+            if (running) EcoRecord(tick);                            // ekonomia graczy: co 1 s
             if (g_eco && running && iter % 50 == 0) EcoDump(tick);  // sonda ekonomii: co 5 s
             AcquireSRWLockExclusive(&g_logLock);
             if (g_log) fflush(g_log);

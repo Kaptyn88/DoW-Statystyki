@@ -60,8 +60,6 @@ class OverlaySettings:
     locked: bool = False
     sum_opacity: float = 1.0      # podsumowanie: osobna przezroczystość (domyślnie pełne, nieprzezroczyste okno)
     sum_locked: bool = False      # i osobna blokada
-    sum_w: int = 0                # stały rozmiar podsumowania: rośnie do największej zawartości, nie maleje
-    sum_h: int = 0
     x: int = 40
     y: int = 120
 
@@ -126,7 +124,6 @@ class OverlayWindow(tk.Toplevel):
     BG = '#11151a'
     POS = ('x', 'y')  # pola OverlaySettings z położeniem okna, przezroczystością i blokadą
     OPACITY, LOCK = 'opacity', 'locked'
-    SIZE = None       # pola (szer., wys.) stałego rozmiaru; None = okno dopasowuje się do treści
 
     @property
     def locked(self):
@@ -143,7 +140,6 @@ class OverlayWindow(tk.Toplevel):
         self._drag = None
         self._cells = {}          # (rodzaj, wiersz, kolumna) -> (widget, ostatnia specyfikacja)
         self._last_cells = None   # ostatni układ – bez zmian nic nie przerysowujemy
-        self._sized = None        # rozmiar ustawiony przez _fit_size
         self.bind_all_drag(self)
         self.geometry(f'+{getattr(settings, self.POS[0])}+{getattr(settings, self.POS[1])}')
         self.after(50, self.apply_window_style)
@@ -153,28 +149,6 @@ class OverlayWindow(tk.Toplevel):
         w.bind('<ButtonPress-1>', self._start_drag)
         w.bind('<B1-Motion>', self._on_drag)
         w.bind('<ButtonRelease-1>', self._end_drag)
-        if self.SIZE:
-            w.bind('<Double-Button-1>', self._reset_size)
-
-    def _reset_size(self, _):
-        """Podwójne kliknięcie odblokowanego okna: rozmiar od nowa dopasowany do bieżącej zawartości."""
-        if not self.locked:
-            setattr(self.s, self.SIZE[0], 0)
-            setattr(self.s, self.SIZE[1], 0)
-            self._fit_size()
-
-    def _fit_size(self):
-        """Stały rozmiar: okno rośnie do największej pokazanej zawartości (np. innej zakładki), ale nie maleje –
-        przełączanie zakładek nie zmienia jego wielkości. Rozmiar zapisuje się w ustawieniach."""
-        self.update_idletasks()
-        w = max(getattr(self.s, self.SIZE[0]), self.body.winfo_reqwidth())
-        h = max(getattr(self.s, self.SIZE[1]), self.body.winfo_reqheight())
-        if (w, h) != (getattr(self.s, self.SIZE[0]), getattr(self.s, self.SIZE[1])) or self._sized != (w, h):
-            setattr(self.s, self.SIZE[0], w)
-            setattr(self.s, self.SIZE[1], h)
-            self.geometry(f'{w}x{h}')
-            self._sized = (w, h)
-            self.s.save()
 
     def _start_drag(self, e):
         if not self.locked:
@@ -216,6 +190,7 @@ class OverlayWindow(tk.Toplevel):
             w, prev = self._cells.get(key, (None, None))
             if w is None:
                 w = (tk.Frame(self.body, height=1, bg='#3a434c') if c['kind'] == 'sep'
+                     else tk.Canvas(self.body, bg=self.BG, highlightthickness=0) if c['kind'] == 'chart'
                      else tk.Label(self.body, bg=self.BG))
                 self.bind_all_drag(w)
             if prev == c:
@@ -227,13 +202,14 @@ class OverlayWindow(tk.Toplevel):
                 w.image = c['image']
                 w.grid(row=c['row'], column=c['col'], columnspan=c['span'], padx=c['padx'], pady=c['pady'],
                        sticky={'w': 'we', 'e': 'e'}.get(c['anchor'], ''))
+            elif c['kind'] == 'chart':
+                draw_chart(w, c)
+                w.grid(row=c['row'], column=c['col'], columnspan=c['span'], sticky='w', pady=(2, 6))
             else:
                 w.grid(row=c['row'], column=c['col'], columnspan=c['span'], sticky='we', pady=(6, 4))
             self._cells[key] = (w, c)
         for key in [k for k in self._cells if k not in used]:  # komórki z poprzedniego układu, których już nie ma
             self._cells.pop(key)[0].destroy()
-        if self.SIZE:
-            self._fit_size()
 
     def _layout(self, rec, cells):
         raise NotImplementedError
@@ -261,6 +237,58 @@ class Cells(list):
 
     def sep(self, row, span):
         self.append({'kind': 'sep', 'row': row, 'col': 0, 'span': span})
+
+    def chart(self, row, span, points, colors, width, height, end_label):
+        self.append({'kind': 'chart', 'row': row, 'col': 0, 'span': span, 'points': tuple(points),
+                     'colors': tuple(colors), 'w': width, 'h': height, 'end': end_label})
+
+
+def _dim(color, bg='#11151a', k=0.35):
+    """Kolor wypełnienia: color zmieszany z tłem (k = udział koloru)."""
+    a = [int(color[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(bg[i:i + 2], 16) for i in (1, 3, 5)]
+    return '#' + ''.join(f'{round(x * k + y * (1 - k)):02x}' for x, y in zip(a, b))
+
+
+def draw_chart(cv, c):
+    """Wykres przewagi jak "Income advantage" w SC2: nad zerem przewaga drużyny 1 (jej kolor), pod zerem drużyny 2."""
+    cv.delete('all')
+    w, h, pts = c['w'], c['h'], c['points']
+    cv.configure(width=w, height=h)
+    left, right, top, bottom = 44, w - 6, 6, h - 16
+    font = ('Segoe UI', 8)
+    if len(pts) < 2:
+        cv.create_text(w // 2, h // 2, text='–', fill='#6b747c', font=font)
+        return
+    t0, t1 = pts[0][0], pts[-1][0]
+    span = max(1, t1 - t0)
+    ymax = max(abs(v) for _, v in pts)
+    nice = next((n for n in (50, 100, 150, 250, 500, 750, 1000, 1500, 2500, 5000, 10000) if n >= ymax), ymax or 1)
+    mid = (top + bottom) / 2
+
+    def xy(tick, v):
+        return left + (tick - t0) / span * (right - left), mid - v / nice * (bottom - top) / 2
+
+    pos, neg = c['colors']
+    cv.create_rectangle(left, top, right, mid, fill=_dim(pos, k=0.08), outline='')
+    cv.create_rectangle(left, mid, right, bottom, fill=_dim(neg, k=0.08), outline='')
+    for v, col in ((nice, pos), (0, '#9aa3ab'), (-nice, neg)):
+        y = xy(t0, v)[1]
+        cv.create_text(left - 4, y, text=f'{abs(v):.0f}', anchor='e', fill=col, font=font)
+        cv.create_line(left, y, right, y, fill='#2a3138')
+    # odcinki: przy zmianie znaku dzielimy w punkcie przecięcia zera
+    for (ta, va), (tb, vb) in zip(pts, pts[1:]):
+        segs = [((ta, va), (tb, vb))]
+        if va * vb < 0:
+            tz = ta + (tb - ta) * va / (va - vb)
+            segs = [((ta, va), (tz, 0.0)), ((tz, 0.0), (tb, vb))]
+        for (a, av), (b, bv) in segs:
+            col = pos if (av + bv) > 0 else neg
+            (xa, ya), (xb, yb) = xy(a, av), xy(b, bv)
+            cv.create_polygon(xa, mid, xa, ya, xb, yb, xb, mid, fill=_dim(col), outline='')
+            cv.create_line(xa, ya, xb, yb, fill=col, width=2)
+    cv.create_text(left, h - 2, text='0:00', anchor='sw', fill='#6b747c', font=font)
+    cv.create_text(right, h - 2, text=c['end'], anchor='se', fill='#6b747c', font=font)
 
 
 def fmt_res(req, pw):
@@ -297,7 +325,7 @@ class UnitOverlay(OverlayWindow):
         return c
 
 
-SUMMARY_TABS = ('army', 'losses')
+SUMMARY_TABS = ('army', 'losses', 'eco', 'research')
 LOST_PER_ROW = 12  # ikon w wierszu zakładki Straty
 
 
@@ -305,7 +333,6 @@ class SummaryOverlay(OverlayWindow):
     """Nakładka 2: podsumowanie meczu w zakładkach (przełączane skrótem klawiszowym)."""
     POS = ('sum_x', 'sum_y')
     OPACITY, LOCK = 'sum_opacity', 'sum_locked'
-    SIZE = ('sum_w', 'sum_h')
 
     def _layout(self, rec, c):
         s = self.s
@@ -321,6 +348,10 @@ class SummaryOverlay(OverlayWindow):
         c.label(f'{names}   ·  {fmt_time(tick, rec.tps)}', 0, 0, fg='#c0c6cc', f=c.small, columnspan=11)
         if tab == 'losses':
             self._losses(rec, c, tick)
+        elif tab == 'eco':
+            self._eco(rec, c, tick)
+        elif tab == 'research':
+            self._research(rec, c)
         else:
             self._army(rec, c, tick)
         return c
@@ -410,6 +441,71 @@ class SummaryOverlay(OverlayWindow):
                     pady=(2, 0))
             row += 1
         c.label(t('ov_losses_note'), row, 0, fg='#6b747c', f=c.small, columnspan=LOST_PER_ROW, pady=(4, 0))
+
+    def _eco(self, rec, c, tick):
+        """Ekonomia: stan konta, dochód na minutę i zebrane łącznie każdego gracza (drużynami) + wykresy przewagi
+        dochodu drużyny 1 nad 2, osobno rekwizycja i energia. Dane: rekord 'eco' rejestratora (co ~1 s)."""
+        if not rec.eco:
+            c.label(t('eco_none'), 1, 0, fg='#6b747c', f=c.small, columnspan=6)
+            return
+        pcolor = self.colors(rec)
+        per_min = 60 * rec.tps
+        teams = rec.teams()
+        row = 1
+        for i, head in enumerate((t('eco_col_bank'), t('eco_col_income'), t('eco_col_total'))):
+            c.label(head, row, 1 + i, fg='#6b747c', f=c.small, anchor='e', padx=(12, 0))
+        row += 1
+        for side, team in enumerate(teams):
+            if side:
+                c.sep(row, 4)
+                row += 1
+            for pid in team:
+                e = rec.eco_at(pid)
+                c.label(rec.players.get(pid, '?'), row, 0, fg=pcolor.get(pid, '#e6e9ec'), f=c.bold)
+                if e:
+                    _, req, pw, ir, ip, cr, cp = e
+                    for i, (a, b) in enumerate(((req, pw), (ir * per_min, ip * per_min), (cr, cp))):
+                        c.label(fmt_res(a, b), row, 1 + i, anchor='e', padx=(12, 0))
+                row += 1
+        colors = [pcolor.get(team[0], '#e6e9ec') if team else '#e6e9ec' for team in teams]
+        width, height = self.s.font_size * 46, self.s.font_size * 11
+        names = [' · '.join(rec.players.get(p, '?') for p in team) for team in teams]
+        for which, key in ((3, 'eco_chart_req'), (4, 'eco_chart_pow')):
+            c.label(t(key, a=names[0], b=names[1]), row, 0, fg='#c0c6cc', f=c.small, columnspan=4, pady=(8, 0))
+            row += 1
+            c.chart(row, 4, rec.income_advantage(teams, which), colors, width, height, fmt_time(tick, rec.tps))
+            row += 1
+
+    def _research(self, rec, c):
+        """Ukończone ulepszenia (rekord 'res'): drużyna po lewej i po prawej, każdy gracz z listą czas + ikona + nazwa
+        i sumą wydaną na ulepszenia (ceny z danych gry)."""
+        if not rec.research and not rec.eco:
+            c.label(t('res_none'), 1, 0, fg='#6b747c', f=c.small, columnspan=6)
+            return
+        pcolor = self.colors(rec)
+        for side, team in enumerate(rec.teams()):
+            col0 = side * 3  # kolumny: czas, nazwa, odstęp
+            if side:
+                c.label('', 1, 2, padx=(14, 14))
+            row = 1
+            for pid in team:
+                done = rec.research.get(pid, [])
+                req = sum(CATALOG.research_cost(n)[0] for _, n in done)
+                pw = sum(CATALOG.research_cost(n)[1] for _, n in done)
+                c.label(rec.players.get(pid, '?'), row, col0, fg=pcolor.get(pid, '#ccc'), f=c.bold, columnspan=2,
+                        pady=(6 if row > 1 else 0, 0))
+                row += 1
+                if not done:
+                    c.label('–', row, col0 + 1, fg='#6b747c')
+                    row += 1
+                for tick, name in done:
+                    c.label(fmt_time(tick, rec.tps), row, col0, fg='#9aa3ab', f=c.small, anchor='e', padx=(0, 6))
+                    c.label(f' {CATALOG.research(name) or name}', row, col0 + 1,
+                            image=iconcache.photo(CATALOG.icon_file(CATALOG.research_icon(name), c.icon_px)))
+                    row += 1
+                if done:
+                    c.label(t('res_spent', v=fmt_res(req, pw)), row, col0 + 1, fg='#6b747c', f=c.small)
+                    row += 1
 
 
 class Overlays:

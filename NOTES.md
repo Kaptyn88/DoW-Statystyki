@@ -375,7 +375,41 @@ nakładka podsumowania z zakładkami.
     dane ekranu statystyk końcowych) oraz `?QueryRelationship@World@@QEBA_NPEBVPlayer@@0W4PlayerRelationship@1@@Z`
     (sojusznik/wróg – pewniejsze drużyny niż heurystyka z obrażeń). Rozmiar struktury PlayerStats nieznany – NIE
     wołać na ślepo; najpierw disasm (analysis/disasm_range.py SimEngine.dll <rva>), ile bajtów zapisuje.
-- DO ZROBIENIA: sonda ekonomii (zebrane zasoby gracza – licznik z ekranu statystyk końcowych?), sonda ulepszeń
+- WYNIK SONDY (2026-10-19, powtórka 2P_BATTLE_MARSHES 19-19-35, Raguel 1000 vs Komputer 1 1001):
+  obiekt gracza = klasa `.?AVSigmaPlayer@@` (DXP3Mod, vtable DXP3+0x389e68), z World::GetPlayerFromID. Pola float:
+  - +0x3f8 = rekwizycja (stan konta), +0x3fc = energia (stan konta) – POTWIERDZONE z ekranem gry:
+    1:35 Komputer energia 155 (pamięć 155.00), 2:36 Raguel 49 rek / 176 en (pamięć 49.55 / 176.38).
+  - +0x410 = dochód rekwizycji NA TICK (0.25 -> 0.85; x 480 = na minutę), +0x414 = dochód energii na tick (0.125)
+    – POTWIERDZONE rachunkiem: tick 1009->1049 rekwizycja +28.0 = 40 x 0.70; tick 467->507 energia +5.0 = 40 x 0.125.
+  - +0x400: 15 -> 3 -> 22 (NIEZNANE; może dusze/populacja – nie używać), +0x418 chwilowe.
+  - Licznika "zebrane łącznie" w obiekcie nie ma -> zebrane = suma dochodu w czasie (zapis dochodu co 1 s).
+  - Pomiar 54 s nie pasował (tick 432 wypada między próbkami, gdy energia skoczyła 80 -> 138.5) – zegar gry vs
+    ticki przesunięte o kilka sekund.
+  - Offsety dotyczą DXP3Mod.dll w wersji 2.10.3.1 – po aktualizacji gry sprawdzić ponownie (eco_scan.py --at).
+- ZROBIONE (kod, 2026-10-19): rekord {"t":"eco",tick,pid,req,pow,ir,ip} co ~1 s (EcoRecord; tylko gdy RTTI obiektu
+  gracza zawiera "SigmaPlayer", wartości 0..1e7). recmodel: Recording.eco (zebrane = suma ir/ip x Δtick),
+  eco_at(), income_advantage(teams, 3|4) w /min. Zakładka "Ekonomia" (SUMMARY_TABS): stan / dochód na min /
+  zebrane łącznie + 2 wykresy przewagi (Canvas, draw_chart, kolory drużyn). Sprawdzone offline na nagraniu testowym
+  z rekordami eco wyliczonymi ze zrzutów sondy (scratchpad make_eco_rec.py); DLL skompilowany próbnie –
+  NIE sprawdzony w grze (gra trzymała probe/bin/dowrec.dll – przebudować build.bat po jej zamknięciu).
+  Zebrane łącznie nie obejmuje zasobów startowych.
+- WYCOFANE na prośbę użytkownika: stały rozmiar okna podsumowania (sum_w/sum_h) – okno znów dopasowuje się do treści.
+- ULEPSZENIA (badania) – ustalenia 2026-10-19:
+  - SimEngine nie ma nic o badaniach; wszystko w DXP3Mod (napisy: "Research not found while loading Research Array
+    in SigmaPlayer", Player_GetResearchState, Stats_PlayerTechResearched, CompletedResearchCount, UICueResearchCompleted).
+  - Loader tablicy badań DXP3 0x19b320 (Chunky "ASER", nazwy -> ResearchInfo* przez 0x183860) wołany z
+    SigmaPlayer::Load (0x199d1c, 0x199d2e) dla pól +0x2a8 i +0x2c0 (std::vector<ResearchInfo*>); +0x290 innym
+    loaderem 0x19aca0.
+  - W zrzutach sondy (Battle Marshes): +0x2a8 Raguel 0 -> 3 (ticki 762, 3163, 3413), Komputer 0 -> 1 (2118);
+    +0x290 Raguel 0 -> 5, Komputer 0 -> 4; +0x2c0 puste.
+  - POTWIERDZONE (sonda RES 2026-10-19 + notatki użytkownika z ekranu): +0x2a8 = UKOŃCZONE badania, element =
+    wskaźnik do wpisu tabeli badań, nazwa pliku = *(char**)element. ork_research_grot_infiltrate tick 750 (gra 1:33),
+    ork_research_eavy_armor_boyz 3137 (6:32), ork_research_burna 3377 (7:01–7:02). +0x290 = typy postawionych
+    budynków (ork_boy_hut, ork_generator, ...), nie badania.
+  - Rejestrator: rekord {"t":"res",tick,pid,name} co ~1 s przy wydłużeniu +0x2a8 (ResearchRecords).
+  - Katalog v5: research[name] = nazwa pl/en/ru (ui_info/screen_name_id), ikona, rasa, koszt time_cost/cost
+    (417 badań, 277 z ikoną). Zakładka "Ulepszenia": drużyny w dwóch kolumnach, czas + ikona + nazwa, "wydano R/E".
+- (stare) DO ZROBIENIA: sonda ekonomii (zebrane zasoby gracza – licznik z ekranu statystyk końcowych?), sonda ulepszeń
   (moment ukończenia badania), zakładki Ekonomia / Ulepszenia, wykres przewagi.
 
 ## Docelowy projekt rejestratora (zrealizowany powyżej, notatka historyczna)

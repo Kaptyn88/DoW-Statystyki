@@ -112,7 +112,7 @@ def extract_icons(vfs, cat, out_dir):
     """Ikony oddziałów, jednostek i zdolności: TGA z gry -> out_dir/icons/<nazwa>_<rozmiar>.png.
     Zapisuje cat['icons'] = {nazwa ikony: rdzeń nazwy pliku}; brakujące w archiwach pomija."""
     os.makedirs(os.path.join(out_dir, 'icons'), exist_ok=True)
-    wanted = {e['icon'] for kind in ('squads', 'units', 'abilities') for e in cat[kind].values() if e.get('icon')}
+    wanted = {e['icon'] for kind in ('squads', 'units', 'abilities', 'research') for e in cat[kind].values() if e.get('icon')}
     done = {}
     for icon in sorted(wanted):
         src = ICON_DIR + icon.replace('/', BS) + '.tga'
@@ -237,7 +237,7 @@ def _build(args):
                 print('  pominięto', p, e, file=sys.stderr)
         return out
 
-    cat = {'version': 4, 'abilities': {}, 'weapons': {}, 'units': {}, 'squads': {}, 'source': {
+    cat = {'version': 5, 'abilities': {}, 'weapons': {}, 'units': {}, 'squads': {}, 'research': {}, 'source': {
         'layers': [n for n, _ in vfs.archives], 'ucs': 'Engine/Locale/{Polish,English,Russian}/Engine.ucs'}}
 
     for p, (layer, t) in load('attrib\\abilities\\').items():
@@ -255,6 +255,13 @@ def _build(args):
         mn, mx = damage_of(t)
         cat['weapons'][name] = {**names(screen_name(t)), 'race': race_of(name), 'layer': layer,
                                 'damage': [round(mn, 1), round(mx, 1)], 'units': []}
+    # badania (ulepszenia): nazwa, ikona, rasa, koszt (time_cost/cost – inaczej niż jednostki: cost_ext/time_cost/cost)
+    for p, (layer, t) in load('attrib\\research\\').items():
+        name = os.path.splitext(os.path.basename(p))[0]
+        c = t.get('time_cost', {}).get('cost', {}) if isinstance(t.get('time_cost'), dict) else {}
+        cat['research'][name] = {**names(screen_name(t)), 'icon': icon_name(t), 'race': race_of(name), 'layer': layer,
+                                 'cost': [round(float(c.get('requisition', 0.0) or 0.0), 1),
+                                          round(float(c.get('power', 0.0) or 0.0), 1)]}
     for kind, prefix in (('units', 'attrib\\ebps\\races\\'), ('squads', 'attrib\\sbps\\races\\')):
         for p, (layer, t) in load(prefix).items():
             parts = p.split('\\')
