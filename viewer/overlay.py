@@ -9,6 +9,7 @@ Działa nad grą w trybie okna bez ramki (W40k.ini: screenwindowed = 2); nad pe�
 """
 import collections
 import ctypes
+import ctypes.wintypes as wt
 import json
 import os
 import tkinter as tk
@@ -117,7 +118,39 @@ def set_click_through(win, enabled):
     style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE) | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
     style = style | WS_EX_TRANSPARENT if enabled else style & ~WS_EX_TRANSPARENT
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+    _no_activate_on_click(win, hwnd)
     return True
+
+
+# Kliknięcie odblokowanej nakładki (przeciąganie, zakładki, kółko) nie może aktywować jej okna: gra traci wtedy fokus
+# i na chwilę staje. Tk na WM_MOUSEACTIVATE odpowiada MA_ACTIVATE mimo WS_EX_NOACTIVATE (sprawdzone 2026-10-19:
+# SendMessage(WM_MOUSEACTIVATE) -> 1), więc podmieniamy procedurę okna głównego nakładki: MA_NOACTIVATE, reszta do Tk.
+WM_MOUSEACTIVATE, MA_NOACTIVATE, GWLP_WNDPROC = 0x21, 3, -4
+
+
+def _no_activate_on_click(win, hwnd):
+    """Procedura zapamiętana na oknie Tk (musi żyć tak długo jak okno; numer hwnd zamkniętego okna Windows może
+    nadać nowemu, więc nie trzymamy globalnej listy)."""
+    if getattr(win, '_noact', (None,))[0] == hwnd:
+        return
+    user32 = ctypes.windll.user32
+    lresult = ctypes.c_ssize_t
+    proc_t = ctypes.WINFUNCTYPE(lresult, wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM)
+    user32.SetWindowLongPtrW.argtypes = [wt.HWND, ctypes.c_int, ctypes.c_void_p]
+    user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+    user32.CallWindowProcW.argtypes = [ctypes.c_void_p, wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM]
+    user32.CallWindowProcW.restype = lresult
+
+    old = [None]
+
+    def proc(h, msg, wp, lp):
+        if msg == WM_MOUSEACTIVATE:
+            return MA_NOACTIVATE
+        return user32.CallWindowProcW(old[0], h, msg, wp, lp)
+
+    cb = proc_t(proc)
+    win._noact = (hwnd, cb)
+    old[0] = user32.SetWindowLongPtrW(hwnd, GWLP_WNDPROC, ctypes.cast(cb, ctypes.c_void_p))
 
 
 class OverlayWindow(tk.Toplevel):
