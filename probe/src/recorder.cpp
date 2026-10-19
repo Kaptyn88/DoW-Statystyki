@@ -35,6 +35,7 @@
 #include <wchar.h>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 #include "MinHook.h"
 
 // ---------------------------------------------------------------- stan globalny
@@ -73,6 +74,7 @@ static inline void PerfAdd(LONG64 dt)
 }
 static std::unordered_map<unsigned long, unsigned long>* g_entSquad; // id encji -> ostatni zapisany oddział
 static std::unordered_set<unsigned long>* g_players;
+static std::unordered_map<unsigned long, uintptr_t>* g_playerObj;  // pid -> obiekt gracza (sonda ekonomii, pod g_lock)
 static std::unordered_set<int>* g_weapons;
 static std::unordered_map<unsigned long, int>* g_lastMelee; // id encji -> ostatnia broń wręcz (do ataków specjalnych)
 
@@ -86,6 +88,8 @@ static FnGetBp  pEntGetBp, pSquadGetBp;
 static FnGetId  pEntGetId, pSquadGetId, pPlayerGetId;
 static FnGetPtr pEntGetSquad, pEntGetOwner;
 static FnWorldTicks pWorldTicks;
+typedef void*          (*FnPlayerFromId)(void*, unsigned long);
+static FnPlayerFromId pPlayerFromId;   // World::GetPlayerFromID (sonda ekonomii: gracze od pierwszej sekundy)
 static FnPlayerName pPlayerName;
 
 // oryginały (konwencja x64 MS, zob. sonda)
@@ -211,6 +215,7 @@ static void EnsureSession(int tick)
     wcscpy_s(g_sessionReplay, g_replayName);
     g_lastTick = tick; g_cntDmg = g_cntDie = 0;
     g_entSquad->clear(); g_players->clear(); g_weapons->clear(); g_lastMelee->clear();
+    if (g_playerObj) g_playerObj->clear();
 
     wchar_t base[MAX_PATH]; wcscpy_s(base, g_sessionReplay[0] ? g_sessionReplay : L"unknown");
     for (wchar_t* c = base; *c; ++c) if (wcschr(L"#<>:\"/\\|?* ", *c)) *c = L'_';
@@ -232,8 +237,85 @@ static void EnsureSession(int tick)
     Log("SESSION open %s tick=%d\n", pathU8, tick);
 }
 
+// ---------------------------------------------------------------- sonda ekonomii (launcher --eco, DOWREC_ECO)
+// Silnik nie eksportuje odczytu zasobów (SimEngine: tylko GetID/GetName gracza), a obiekt gracza to podklasa z modu.
+// Co 5 s zapisujemy surową pamięć obiektu gracza i obiektów, na które wskazuje (pierwszy poziom), do pliku .bin;
+// analysis/eco_scan.py szuka w nich liczb rosnących jak zebrane zasoby. Format (little endian):
+//   rekord: "ECO1" | tick i32 | pid u32 | obj u64 | n u32 | obj[n] | k u32 | k x (off u32 | ptr u64 | 256 B)
+static FILE* g_eco;
+static const size_t kEcoObj = 0x2000, kEcoPtrScan = 0x800, kEcoSub = 0x100;
+
+static void SafeCopy(const void* src, unsigned char* dst, size_t n)
+{
+    for (size_t i = 0; i < n; i += 0x40) {  // kawałkami – niedostępna końcówka obiektu nie psuje reszty
+        size_t m = n - i < 0x40 ? n - i : 0x40;
+        __try { memcpy(dst + i, (const char*)src + i, m); }
+        __except (EXCEPTION_EXECUTE_HANDLER) { memset(dst + i, 0, m); }
+    }
+}
+
+static void LogRttiName(unsigned long pid, uintptr_t obj)
+{
+    // MSVC x64 RTTI: [obj] = vtable, [vtable-8] = CompleteObjectLocator {sig, off, cdOff, typeRVA, classRVA, selfRVA}
+    uintptr_t vt = 0, col = 0;
+    if (!SafeReadPtr((void*)obj, &vt) || !SafeReadPtr((void*)(vt - 8), &col)) return;
+    __try {
+        const unsigned* c = (const unsigned*)col;
+        uintptr_t base = col - c[5];
+        const char* name = (const char*)(base + c[3] + 0x10);
+        char safe[128]; SafeJsonStr(name, safe, sizeof(safe));
+        Log("ECO gracz %lu obiekt %p klasa %s vtable +0x%llx\n", pid, (void*)obj, safe, (unsigned long long)(vt - base));
+    } __except (EXCEPTION_EXECUTE_HANDLER) { Log("ECO gracz %lu obiekt %p (bez RTTI)\n", pid, (void*)obj); }
+}
+
+static void* SafePlayerFromId(uintptr_t world, unsigned long id)
+{
+    __try { return pPlayerFromId((void*)world, id); } __except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
+}
+
+static void EcoDump(int tick)
+{
+    if (!g_eco || tick <= 0) return;
+    std::vector<std::pair<unsigned long, uintptr_t>> players;
+    AcquireSRWLockExclusive(&g_lock);
+    players.assign(g_playerObj->begin(), g_playerObj->end());
+    ReleaseSRWLockExclusive(&g_lock);
+    uintptr_t w = 0;  // gracze ze świata (ID 1000..1007), także ci, którzy jeszcze nie walczyli
+    if (pPlayerFromId && g_worldGlobal && SafeReadPtr(g_worldGlobal, &w) && w)
+        for (unsigned long id = 1000; id < 1008; ++id) {
+            void* pl = SafePlayerFromId(w, id);
+            bool known = false;
+            for (auto& q : players) known |= q.first == id;
+            if (pl && !known) players.push_back({id, (uintptr_t)pl});
+        }
+    static std::unordered_set<unsigned long> named;
+    static std::vector<unsigned char> buf(kEcoObj), sub(kEcoSub);
+    for (auto& [pid, obj] : players) {
+        if (named.insert(pid).second) LogRttiName(pid, obj);
+        SafeCopy((void*)obj, buf.data(), kEcoObj);
+        unsigned n = (unsigned)kEcoObj;
+        unsigned long long o = obj;
+        fwrite("ECO1", 1, 4, g_eco); fwrite(&tick, 4, 1, g_eco); fwrite(&pid, 4, 1, g_eco);
+        fwrite(&o, 8, 1, g_eco); fwrite(&n, 4, 1, g_eco); fwrite(buf.data(), 1, kEcoObj, g_eco);
+        std::vector<std::pair<unsigned, uintptr_t>> ptrs;
+        for (unsigned off = 0; off < kEcoPtrScan; off += 8) {
+            uintptr_t p = *(uintptr_t*)(buf.data() + off);
+            if (p > 0x10000 && p < 0x7FFFFFFFFFFFull && (p & 7) == 0) ptrs.push_back({off, p});
+        }
+        unsigned k = (unsigned)ptrs.size();
+        fwrite(&k, 4, 1, g_eco);
+        for (auto& [off, p] : ptrs) {
+            SafeCopy((void*)p, sub.data(), kEcoSub);
+            unsigned long long pp = p;
+            fwrite(&off, 4, 1, g_eco); fwrite(&pp, 8, 1, g_eco); fwrite(sub.data(), 1, kEcoSub, g_eco);
+        }
+    }
+    fflush(g_eco);
+}
+
 static void DescribePlayer(uintptr_t owner, unsigned long pid)
 {
+    if (owner && g_playerObj && !g_playerObj->count(pid)) (*g_playerObj)[pid] = owner;
     if (!owner || !g_players->insert(pid).second) return;
     char name[256] = "";
     __try {
@@ -588,6 +670,7 @@ static bool ResolveSimEngine()
     pEntGetSquad = (FnGetPtr)    GetProcAddress(s, "?GetSquad@Entity@@QEAAPEAVSquad@@XZ");
     pEntGetOwner = (FnGetPtr)    GetProcAddress(s, "?GetOwner@Entity@@QEAAPEAVPlayer@@XZ");
     pWorldTicks  = (FnWorldTicks)GetProcAddress(s, "?GetGameTicks@World@@QEBAJXZ");
+    pPlayerFromId = (FnPlayerFromId)GetProcAddress(s, "?GetPlayerFromID@World@@QEAAPEAVPlayer@@K@Z");
     return pEntGetBp && pSquadGetBp && pEntGetId && pSquadGetId && pEntGetSquad && pEntGetOwner && pWorldTicks;
 }
 
@@ -792,6 +875,7 @@ static DWORD WINAPI InitThread(LPVOID)
             if (g_out && running) Out("{\"t\":\"clock\",\"tick\":%d}\n", tick);
             if (g_out) fflush(g_out);
             ReleaseSRWLockExclusive(&g_lock);
+            if (g_eco && running && iter % 50 == 0) EcoDump(tick);  // sonda ekonomii: co 5 s
             AcquireSRWLockExclusive(&g_logLock);
             if (g_log) fflush(g_log);
             ReleaseSRWLockExclusive(&g_logLock);
@@ -813,6 +897,9 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID)
     if (!g_log) return TRUE;
     g_entSquad = new std::unordered_map<unsigned long, unsigned long>();
     g_players  = new std::unordered_set<unsigned long>();
+    g_playerObj = new std::unordered_map<unsigned long, uintptr_t>();
+    wchar_t ecoPath[MAX_PATH] = {0};
+    if (GetEnvironmentVariableW(L"DOWREC_ECO", ecoPath, MAX_PATH)) g_eco = _wfsopen(ecoPath, L"wb", _SH_DENYWR);
     g_weapons  = new std::unordered_set<int>();
     g_lastMelee = new std::unordered_map<unsigned long, int>();
     g_armEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);

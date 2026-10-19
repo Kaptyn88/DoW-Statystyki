@@ -329,6 +329,55 @@ Przykładowa powtórka: Downloads\...W-NEC-L-ORK.rec (Necron vs Ork, mapa 2P_TIT
   zaznaczenie co 0,1 s ~0,08 ms/s. Podgląd: 5–7% jednego rdzenia w trakcie walki (osobny proces).
   Użytkownik w AMD Adrenalin nie widzi różnicy FPS z nakładką i bez – zostawiono odświeżanie 0,1 s.
 
+## v1.4 (w toku, 2026-10-19): dwie nakładki, skróty, straty zasobów
+Pomysły użytkownika: skrót do nakładki, wskaźnik ekonomii (zebrane zasoby ŁĄCZNIE; dochód/min gra już pokazuje),
+wynalezione ulepszenia, wykres przewagi ekonomicznej, stracona rekwizycja/energia. Układ: nakładka oddziału +
+nakładka podsumowania z zakładkami.
+- ZROBIONE – ceny: ebps/<model>.rgd -> cost_ext/time_cost/cost/{requisition,power} (np. marine taktyczny 50/0,
+  sierżant 75/25, Predator 165/300, HQ SM 450/0, generator SM 135/0). Oddział: koszt modelu = jego ebps (lider ma
+  własny ebps; squad_reinforce_ext/cost = cena dokupienia modelu, zgodna z ebps). Katalog "version": 4, units[*].cost.
+  529/604 encji ma niezerową cenę. NIEPOTWIERDZONE: necron_basic_warrior ma cenę 0/0 w danych – sprawdzić w grze.
+  Bez ulepszeń broni oddziału (osobne koszty upgrade) i bez częściowej ceny budynku w budowie; startowe HQ liczone
+  pełną ceną.
+- ZROBIONE – straty/zniszczona wartość (recmodel._Acc._charge): przy zgonie (dmg.k / die) cena modelu do
+  S[ofiara]['lost_req'/'lost_pow'] i S[zabójca]['killed_req'/'killed_pow'] (bez friendly fire; zgon w DoT ->
+  sprawca DoT). Raz na encję – Nekroni wstają i giną ponownie (1 encja z 2 zgonami w NEC-ORK).
+  Stats.player_totals(pid).
+- ZROBIONE – ciała z Jamy Tortur DE (dark_eldar_torture_pit_corpse, oddział dark_eldar_squad_slave_murdered) nie są
+  liczone jako zabite/stracone modele (recmodel.is_model); wcześniej Raguel "stracił" 145 modeli, faktycznie 7.
+- ZROBIONE – overlay.py: OverlayWindow (wspólne), UnitOverlay (tylko zaznaczony oddział + wartość zniszczona/stracona),
+  SummaryOverlay (zakładki 'army' = dawny ranking, 'losses' = zasoby graczy), Overlays (menedżer + skróty).
+  Ustawienia: sum_enabled, sum_tab, sum_x/sum_y, key_unit/key_summary/key_tab (domyślnie F6/F7/F8).
+- ZROBIONE – hotkeys.py: RegisterHotKey(NULL, MOD_NOREPEAT) w osobnym wątku z GetMessage (Tk nie przekazuje WM_HOTKEY),
+  akcje w kolejce, podgląd odbiera je w _tick (co 0,1 s). Zajęty klawisz -> komunikat w oknie ustawień. Przy zmianie
+  języka (restart okna) skróty zwalniane przed destroy(). NIEPOTWIERDZONE: czy F6–F8 nie kolidują z klawiszami gry.
+- Test: zrzut okna poza ekranem (PrintWindow) pokazuje nieodrysowane resztki – to artefakt testu; na ekranie czysto,
+  a lista widżetów po przełączeniu zakładki poprawna (scratchpad/check_slaves.py, winshot.py).
+- ZROBIONE – drużyny (Recording.teams): rejestrator ich nie zna; podział graczy z największymi obrażeniami między
+  stronami (pair_dmg bez ff), remis -> kolejność pid (1. połowa vs 2.). Sprawdzone: 3v3 #47672736 = SOB/CSM/SM vs
+  NEC/DE/TAU (zgodne z nazwą powtórki), 1v1 poprawne. NIEPOTWIERDZONE dla FFA / 2v2 z AI.
+- ZROBIONE – zakładka Armia: dwie kolumny (drużyna lewa/prawa), gracz + jego najlepsze oddziały (obrażenia, zabite).
+  Zakładka Straty na wzór "Units Lost" z SC2: ikony straconych modeli/budynków z liczbą + suma R/E na drużynę.
+- Prośba użytkownika: wykres "Income advantage" jak w SC2, osobno rekwizycja i energia -> wymaga sondy ekonomii.
+- ZROBIONE – okno podsumowania: osobna przezroczystość/blokada (sum_opacity domyślnie 1.0, sum_locked), stały rozmiar
+  (sum_w/sum_h rośnie do największej zawartości, nie maleje; podwójne kliknięcie odblokowanego okna = dopasuj od nowa).
+- SONDA EKONOMII (zbudowana 2026-10-19, NIE uruchomiona):
+  - SimEngine nie eksportuje zasobów gracza (Player@@: tylko GetID/GetName/timery itp.) – obiekt gracza to podklasa
+    z modu. Launcher `--eco` (= --rec + DOWREC_ECO) -> rejestrator co 5 s zapisuje probe/logs/eco_<data>.bin:
+    0x2000 B obiektu gracza + po 256 B z każdego wskaźnika w pierwszych 0x800 B. Gracze z World::GetPlayerFromID
+    (1000..1007), więc od początku meczu. W logu rec_*.log: "ECO gracz <pid> obiekt ... klasa <RTTI>".
+  - Analiza: `python analysis/eco_scan.py` (najnowszy eco_*.bin) – rosnące floaty = kandydaci na "zebrane łącznie",
+    zmienne 0..50000 = "stan konta"; `--at 1000:<tick>=<wartość z ekranu>` zawęża (odczytać z gry stan rekwizycji
+    przy pauzie i podać tick z podglądu).
+  - Uruchomienie testu: `probe\bin\dowprobe_launcher.exe --eco` (z głównego folderu), podgląd osobno (viewer\podglad.bat).
+  - TROP NA PÓŹNIEJ (lepszy niż zgadywanie z pamięci): SimEngine eksportuje
+    `?GetCurrentPlayerStats@World@@QEAAXPEAUPlayerStats@@@Z` (World::GetCurrentPlayerStats(PlayerStats*) – zapewne
+    dane ekranu statystyk końcowych) oraz `?QueryRelationship@World@@QEBA_NPEBVPlayer@@0W4PlayerRelationship@1@@Z`
+    (sojusznik/wróg – pewniejsze drużyny niż heurystyka z obrażeń). Rozmiar struktury PlayerStats nieznany – NIE
+    wołać na ślepo; najpierw disasm (analysis/disasm_range.py SimEngine.dll <rva>), ile bajtów zapisuje.
+- DO ZROBIENIA: sonda ekonomii (zebrane zasoby gracza – licznik z ekranu statystyk końcowych?), sonda ulepszeń
+  (moment ukończenia badania), zakładki Ekonomia / Ulepszenia, wykres przewagi.
+
 ## Docelowy projekt rejestratora (zrealizowany powyżej, notatka historyczna)
 - Hooki: ApplyDamage (wejście/wyjście), SetHealth (faktyczna strata HP), Death (zgon) + bezpiecznik .rec + World (czas).
 - Zdarzenie na każde skuteczne ApplyDamage: tick, atakujący (id, bp, squadId, owner), ofiara (to samo), broń

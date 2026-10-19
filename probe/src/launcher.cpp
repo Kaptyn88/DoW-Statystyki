@@ -142,16 +142,18 @@ static const wchar_t* T(const wchar_t* pl, const wchar_t* en, const wchar_t* ru)
 
 int wmain(int argc, wchar_t** argv)
 {
-    // dowprobe_launcher.exe [--rec] [--out <folder nagrań>] [--logs <folder dzienników>] [--check] [--where] [folder_gry]
+    // dowprobe_launcher.exe [--rec] [--eco] [--out <folder nagrań>] [--logs <folder dzienników>] [--check] [--where] [folder_gry]
+    //   --eco    jak --rec + sonda ekonomii (zrzuty pamięci obiektów graczy co 5 s, analysis/eco_scan.py)
     //   --check  tylko sprawdź: gra znaleziona i nie działa (kod 0) – komunikat w języku użytkownika (Start.bat)
     // polskie znaki i cyrylica: w konsoli UTF-16 (WriteConsoleW), przy przekierowaniu do pliku/potoku UTF-8
     _setmode(_fileno(stdout), GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) == FILE_TYPE_CHAR ? _O_U16TEXT : _O_U8TEXT);
-    bool rec = false, check = false, where = false;
+    bool rec = false, check = false, where = false, eco = false;
     std::wstring game, outArg, logsArg;
     for (int i = 1; i < argc; ++i) {
         if (_wcsicmp(argv[i], L"--rec") == 0) rec = true;
         else if (_wcsicmp(argv[i], L"--check") == 0) check = true;
         else if (_wcsicmp(argv[i], L"--where") == 0) where = true;
+        else if (_wcsicmp(argv[i], L"--eco") == 0) eco = rec = true;  // sonda ekonomii (zrzuty pamięci graczy)
         else if (_wcsicmp(argv[i], L"--out") == 0 && i + 1 < argc) outArg = argv[++i];
         else if (_wcsicmp(argv[i], L"--logs") == 0 && i + 1 < argc) logsArg = argv[++i];
         else game = argv[i];
@@ -198,6 +200,14 @@ int wmain(int argc, wchar_t** argv)
         GetFullPathNameW((outArg.empty() ? dir + L"\\..\\..\\recordings" : outArg).c_str(), MAX_PATH, recDir, nullptr);
         CreateDirectoryW(recDir, nullptr);
         SetEnvironmentVariableW(L"DOWREC_OUT", recDir);
+    }
+    if (eco) {  // --eco: rejestrator dodatkowo zrzuca co 5 s pamięć obiektów graczy do <dzienniki>\eco_<data>.bin
+        // name = "\rec_YYYYMMDD_HHMMSS.log" -> "\eco_YYYYMMDD_HHMMSS.bin" w tym samym folderze co dziennik
+        std::wstring ecoName = full;
+        ecoName = ecoName.substr(0, ecoName.find_last_of(L'\\')) + L"\\eco" + (name + 4);
+        ecoName = ecoName.substr(0, ecoName.size() - 4) + L".bin";
+        SetEnvironmentVariableW(L"DOWREC_ECO", ecoName.c_str());
+        wprintf(L"ECO: %ls\n", ecoName.c_str());
     }
 
     wprintf(T(L"UWAGA: tylko do oglądania powtórek. Do gry sieciowej/rankingowej uruchamiaj grę normalnie przez Steam.\n\n",

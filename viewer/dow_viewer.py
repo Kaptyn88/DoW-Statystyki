@@ -18,7 +18,7 @@ import iconcache
 import paths
 import recmodel
 from i18n import t
-from overlay import Overlay, OverlaySettings, OverlaySettingsWindow
+from overlay import Overlays, OverlaySettings, OverlaySettingsWindow
 from recmodel import Recording
 
 REC_DIR = paths.REC_DIR
@@ -67,7 +67,7 @@ class Viewer(tk.Tk):
         self._row_keys = {}       # iid wiersza -> klucz oddziału
         self._row_spec = {}       # iid wiersza -> ostatnio wpisane wartości (aktualizacja tylko przy zmianie)
         self.ov_settings = OverlaySettings.load()
-        self.overlay = None
+        self.overlays = Overlays(self, self.ov_settings)  # nakładka oddziału + podsumowanie + skróty klawiszowe
         self.ov_window = None
         self._build_ui()
         self.open(path or newest_recording())
@@ -75,7 +75,7 @@ class Viewer(tk.Tk):
         if not os.path.exists(paths.CATALOG_PATH) or recmodel.CATALOG.outdated():
             self._build_catalog()
         self.after(1000, self._tick)
-        if self.ov_settings.enabled:
+        if self.ov_settings.enabled or self.ov_settings.sum_enabled:
             self.after(200, self._overlay_changed)
 
     # ------------------------------------------------------------------ UI
@@ -166,6 +166,7 @@ class Viewer(tk.Tk):
         i18n.save(code)
         # stan potrzebny nowemu oknu – odczytany przed destroy(), potem zmienne Tk już nie działają
         self.restart = (self.rec.path if self.rec else None, self.follow_newest.get())
+        self.overlays.hotkeys.stop()  # nowe okno zarejestruje te same klawisze
         self.destroy()
 
     # ------------------------------------------------------------------ dane
@@ -242,8 +243,7 @@ class Viewer(tk.Tk):
                 self.tree.see(iid)
                 break
         self._show_detail()
-        if self.overlay:
-            self.overlay.render(self.rec)
+        self.overlays.render(self.rec)
 
     def _tick(self):
         """Co 0,1 s czyta nowe linie nagrania. Zmiana zaznaczenia w grze -> odświeżenie od razu (mniejsze opóźnienie);
@@ -268,14 +268,14 @@ class Viewer(tk.Tk):
                     self._dirty = False
                     self.player_box.configure(values=[t('all_players')] + list(self.rec.players.values()))
                     self.refresh()
-                    if self.overlay:
-                        self.overlay.render(self.rec)
+                    self.overlays.render(self.rec)
                 elif second:
                     self._update_rec_status()
-                    if self.overlay:
-                        self.overlay.render(self.rec)
-            elif second and self.overlay:
-                self.overlay.render(self.rec)
+                    self.overlays.render(self.rec)
+            elif second:
+                self.overlays.render(self.rec)
+            if self.overlays.poll_hotkeys(self.rec) and self.ov_window and self.ov_window.winfo_exists():
+                self.ov_window.refresh_from_settings()
         finally:
             self.after(100, self._tick)
 
@@ -285,17 +285,11 @@ class Viewer(tk.Tk):
             self.ov_window.lift()
             return
         players = list(self.rec.players.values()) if self.rec else []
-        self.ov_window = OverlaySettingsWindow(self, self.ov_settings, players, self._overlay_changed)
+        self.ov_window = OverlaySettingsWindow(self, self.ov_settings, players, self._overlay_changed,
+                                               self.overlays.apply_hotkeys, self.overlays.hotkeys.failed)
 
     def _overlay_changed(self):
-        if self.ov_settings.enabled and not self.overlay:
-            self.overlay = Overlay(self, self.ov_settings)
-        elif not self.ov_settings.enabled and self.overlay:
-            self.overlay.destroy()
-            self.overlay = None
-        if self.overlay:
-            self.overlay.apply_window_style()
-            self.overlay.render(self.rec)
+        self.overlays.changed(self.rec)
 
     def _pid_filter(self):
         name = self.player_filter.get()

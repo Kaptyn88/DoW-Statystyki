@@ -13,7 +13,7 @@ TPS_DEFAULT = 8
 from i18n import lang, t
 from paths import CATALOG_PATH
 
-CATALOG_VERSION = 3  # 2: nazwy pl/en/ru; 3: ikony; starszy katalog podgląd buduje od nowa
+CATALOG_VERSION = 4  # 2: nazwy pl/en/ru; 3: ikony; 4: ceny modeli; starszy katalog podgląd buduje od nowa
 ICONS_DIR = os.path.join(os.path.dirname(CATALOG_PATH), 'icons')
 ICON_SIZES = (20, 26, 32)  # jak catalog/icons.py
 
@@ -82,6 +82,12 @@ class Catalog:
         root = self.c['abilities'].get(v.get('root', ''), {})
         return next((i for i in (v.get('icon'), root.get('icon')) if i in have), None)
 
+    def unit_cost(self, bp):
+        """Cena modelu/budynku (rekwizycja, energia) z danych gry; bez ulepszeń broni oddziału. Nieznany -> (0, 0)."""
+        v = self.c.get('units', {}).get((bp or '').lower())
+        c = v.get('cost') if v else None
+        return (c[0], c[1]) if c else (0.0, 0.0)
+
     def is_structure(self, bp):
         v = self.c.get('units', {}).get((bp or '').lower())
         return bool(v and v.get('category') == 'structures') or 'mine_field' in (bp or '')
@@ -115,6 +121,12 @@ class Catalog:
 
 
 CATALOG = Catalog()
+
+
+def is_model(bp):
+    """Czy encja to prawdziwy model/budynek. Ciała z Jamy Tortur Mrocznych Eldarów (dark_eldar_torture_pit_corpse,
+    oddział dark_eldar_squad_slave_murdered) gra też uśmierca – nie liczymy ich jako zabitych ani straconych modeli."""
+    return not (bp or '').endswith('_corpse')
 
 
 def unit_key(eid, sq):
@@ -155,6 +167,8 @@ class Recording:
         self._last_growth = time.monotonic()  # kiedy plik ostatnio urósł (statystyki na żywo)
         self._live = _Acc(self)                # statystyki całego meczu liczone przyrostowo
         self._labels, self._label_state = {}, None
+        self.pair_dmg = collections.Counter()  # (gracz atakujący, gracz ofiara) -> obrażenia (do ustalenia drużyn)
+        self._teams, self._teams_n = None, -1
         self.poll()
 
     # -- wczytywanie
@@ -221,9 +235,36 @@ class Recording:
                 r['_ak'] = ('powers', pid)
                 self.power_helpers.add(self._key(r['a'], r['as']))
                 self.units.setdefault(r['_ak'], {'bp': 'player_powers', 'pid': pid, 'ents': set(), 'first': tick})
+            if t == 'dmg' and not r['ff']:
+                pa, pv = self.ent_pid.get(r['a']), self.ent_pid.get(r['v'])
+                if pa is not None and pv is not None and pa != pv:
+                    self.pair_dmg[(pa, pv)] += r['hp']
             if t != 'clock':
                 self.events.append((tick, t, r))
                 self.ticks.append(tick)
+
+    def teams(self):
+        """Dwie drużyny (listy pid). Rejestrator nie zna drużyn, więc wybieramy podział graczy, przy którym między
+        stronami poleciało najwięcej obrażeń (przypadkowe trafienia sojuszników są małe). Remis / brak walk: kolejność
+        graczy – pierwsza połowa vs druga (tak było w powtórce 3v3 #47672736: 1000–1002 vs 1003–1005)."""
+        if self._teams_n == len(self.events) and self._teams:
+            return self._teams
+        pids = sorted(self.players)
+        half = set(pids[:len(pids) // 2])
+        best, best_score = None, None
+        for mask in range(1 << max(0, len(pids) - 1)):  # pierwszy gracz zawsze po lewej
+            left = {pids[0]} | {p for i, p in enumerate(pids[1:]) if mask >> i & 1} if pids else set()
+            if len(left) == len(pids) and len(pids) > 1:
+                continue
+            cross = sum(v for (a, b), v in self.pair_dmg.items() if (a in left) != (b in left))
+            agree = sum((p in left) == (p in half) for p in pids)
+            score = (round(cross), agree)
+            if best_score is None or score > best_score:
+                best, best_score = left, score
+        best = best or set()
+        self._teams = [[p for p in pids if p in best], [p for p in pids if p not in best]]
+        self._teams_n = len(self.events)
+        return self._teams
 
     def _is_player_power(self, r):
         """Obrażenia z mocy globalnej: zdolność oznaczona w katalogu jako global albo (zapas) trafienie bez broni,
@@ -328,6 +369,21 @@ class _Acc:
         # sprawcy (rekord 'hp'). HEURYSTYKA (powtórka DE 2026-10-17): małe spadki HP ofiary do DOT_WINDOW po trafieniu
         # zdolnością z fazą _dot przypisujemy tej zdolności i jej sprawcy.
         self.last_dot_hit = {}                                        # ofiara -> (tick, oddział sprawcy, zdolność)
+        self.charged = set()                                          # encje, których cenę już doliczono do strat
+
+    def _charge(self, eid, vk, ak=None):
+        """Zgon modelu: jego cena (rekwizycja/energia) do strat właściciela i do zniszczonej wartości zabójcy.
+        Raz na encję – Nekroni wstają po śmierci i mogą zginąć ponownie."""
+        if eid in self.charged:
+            return
+        self.charged.add(eid)
+        req, pw = CATALOG.unit_cost(self.rec.ent_bp.get(eid))
+        S = self.S
+        S[vk]['lost_req'] += req
+        S[vk]['lost_pow'] += pw
+        if ak is not None:
+            S[ak]['killed_req'] += req
+            S[ak]['killed_pow'] += pw
 
     def feed(self, events):
         rec = self.rec
@@ -344,7 +400,8 @@ class _Acc:
                 else:
                     S[ak]['dealt'] += hp
                     S[ak]['nominal'] += r['nom']
-                    S[ak]['kills'] += r['k']
+                    k_models = r['k'] if is_model(rec.ent_bp.get(r['v'])) else 0
+                    S[ak]['kills'] += k_models
                     S[ak]['hits'] += 1
                     # bez WeaponInfo: rozróżniamy po nazwie zdolności albo ścieżce kodu (src)
                     wkey = r['w'] if r['w'] >= 0 else rec._source_key(r)
@@ -357,12 +414,17 @@ class _Acc:
                     attackers[vk][ak] += hp
                     timeline[ak][tick // bucket] += hp
                 S[vk]['taken'] += hp
-                S[vk]['lost'] += r['k']
+                S[vk]['lost'] += r['k'] if is_model(rec.ent_bp.get(r['v'])) else 0
+                if r['k']:
+                    self._charge(r['v'], vk, None if r['ff'] else ak)
             elif t == 'die':
-                S[rec._key(r['v'], r['vs'])]['lost'] += 1
+                vk = rec._key(r['v'], r['vs'])
+                model = is_model(rec.ent_bp.get(r['v']))
+                S[vk]['lost'] += model
                 dot = last_dot_hit.get(r['v'])
                 if dot and tick - dot[0] <= dot_window:
-                    S[dot[1]]['kills'] += 1                       # zgon w trakcie obrażeń w czasie
+                    S[dot[1]]['kills'] += model                   # zgon w trakcie obrażeń w czasie
+                self._charge(r['v'], vk, dot[1] if dot and tick - dot[0] <= dot_window else None)
             elif t == 'hp':
                 vk = rec._key(r['v'], r['vs'])
                 dot = last_dot_hit.get(r['v'])
@@ -406,6 +468,15 @@ class Stats:
 
     def total_dealt(self, pid=None):
         return sum(c['dealt'] for k, c in self.S.items() if pid is None or self.rec.units.get(k, {}).get('pid') == pid)
+
+    def player_totals(self, pid):
+        """Sumy gracza: zadane, zabite modele, straty i zniszczona wartość (rekwizycja/energia)."""
+        out = collections.Counter()
+        for k, c in self.S.items():
+            if self.rec.units.get(k, {}).get('pid') == pid:
+                for f in ('dealt', 'kills', 'lost', 'lost_req', 'lost_pow', 'killed_req', 'killed_pow'):
+                    out[f] += c[f]
+        return out
 
     def ranking(self, pid=None):
         """Oddziały posortowane malejąco wg zadanych obrażeń (opcjonalnie tylko gracza pid)."""
