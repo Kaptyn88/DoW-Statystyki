@@ -45,11 +45,34 @@ Viewer
 - The "Time" slider shows the state at any moment, "Live" returns to the current one.
 - "Open…" – earlier recordings (the recordings folder next to Start.bat).
 
-Overlay
--------
-"Overlay…" button in the Viewer: enable it, choose the number of squads (2–5), sorting, players,
-columns, opacity, text size, the selected-squad section. Drag the overlay where you like it and tick
-"Lock overlay" – clicks then pass through it to the game. Works in borderless window mode (DE default).
+Overlays
+--------
+There are two overlays, each set up separately ("Overlay…" button in the Viewer):
+- Squad overlay – the squad selected in the game: damage, models killed and lost,
+  value destroyed and lost.
+- Summary overlay – tabs (any of them can be switched off in the settings):
+  Army        – team on the left and on the right, player with faction and their best squads.
+  Losses      – icons of lost units and buildings with counts, and their value.
+  Economy     – resources in bank, income per minute, collected total, income advantage charts
+                (requisition and power separately).
+  Upgrades    – completed research with time; economy research in green.
+  Build order – when a player first fielded a unit type / placed a building (buildings in gold);
+                scroll with the mouse wheel while the overlay is unlocked.
+  Battles     – current army value, army value advantage chart and the biggest battles.
+Hotkeys (work in the game, can be changed in the settings):
+  F6 – show/hide squad overlay, F7 – show/hide summary, F8 – next tab.
+Drag an overlay where you like it and tick "Lock overlay" – clicks then pass through it to the game.
+Works in borderless window mode (DE default).
+
+What the numbers mean:
+- R – requisition, P – power.
+- Losses and army value are resources ACTUALLY SPENT: a model bought with the squad counts at model cost,
+  one added later at reinforcement cost, a leader at its own cost; paid weapons the model used are added
+  (a weapon bought but never fired is not visible).
+- Cancelled construction (resources refunded) and buildings removed after defeat are not losses.
+- Army value – living units, without buildings.
+- Battles – periods with the most damage; bold – smaller losses in that battle.
+- Teams come from the game (ally/enemy), a player's faction from their units.
 
 Safety
 ------

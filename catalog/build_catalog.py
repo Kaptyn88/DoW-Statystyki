@@ -59,6 +59,16 @@ class Vfs:
             for path in a.files:
                 if path.startswith('attrib\\') or path.startswith(ICON_DIR):  # dane + ikony jednostek
                     self.index[path] = (name, a)
+        # ikony w formacie Definitive Edition (.rtx, DXT5) – zapas, gdy brak .tga (np. Berserkerowie Khorne'a,
+        # drużyny broni ciężkiej Gwardii): <warstwa>Data-SharedTextures-Definitive.sga
+        self.rtx = {}
+        for name, rel in reversed(LAYERS):
+            p = os.path.join(game, os.path.dirname(rel), name + 'Data-SharedTextures-Definitive.sga')
+            if os.path.exists(p):
+                a = SgaArchive(p)
+                for path in a.files:
+                    if path.startswith(ICON_DIR) and path.endswith('.rtx'):
+                        self.rtx[path] = a
 
     def list(self, prefix):
         return sorted(p for p in self.index if p.startswith(prefix))
@@ -115,12 +125,27 @@ def extract_icons(vfs, cat, out_dir):
     os.makedirs(os.path.join(out_dir, 'icons'), exist_ok=True)
     wanted = {e['icon'] for kind in ('squads', 'units', 'abilities', 'research') for e in cat[kind].values() if e.get('icon')}
     done = {}
+    # część jednostek podaje ikonę bez folderu (np. necron_wraith: 'necron_wraith_icon', a jego oddział:
+    # 'necron_icons/necron_wraith_icon') – szukamy wtedy pliku o tej nazwie w dowolnym folderze ikon
+    by_name = {}
+    for path in vfs.index:
+        if path.startswith(ICON_DIR) and path.endswith('.tga'):
+            by_name.setdefault(path.rsplit(BS, 1)[-1][:-4].lower(), path)
+    rtx_by_name = {path.rsplit(BS, 1)[-1][:-4].lower(): path for path in vfs.rtx}
     for icon in sorted(wanted):
         src = ICON_DIR + icon.replace('/', BS) + '.tga'
-        if src not in vfs.index:
-            continue
+        if src not in vfs.index and '/' not in icon:
+            src = by_name.get(icon.lower(), src)
         try:
-            w, h, rows = icons.read_tga(vfs.read(src)[1])
+            if src in vfs.index:
+                w, h, rows = icons.read_tga(vfs.read(src)[1])
+            else:  # zapas: tekstura .rtx z archiwów Definitive Edition
+                rtx = ICON_DIR + icon.replace('/', BS) + '.rtx'
+                if rtx not in vfs.rtx and '/' not in icon:
+                    rtx = rtx_by_name.get(icon.lower(), rtx)
+                if rtx not in vfs.rtx:
+                    continue
+                w, h, rows = icons.read_rtx(vfs.rtx[rtx].read(rtx))
         except (ValueError, IndexError, struct.error):
             continue
         stem = icons.file_stem(icon)
@@ -238,7 +263,7 @@ def _build(args):
                 print('  pominięto', p, e, file=sys.stderr)
         return out
 
-    cat = {'version': 6, 'abilities': {}, 'weapons': {}, 'units': {}, 'squads': {}, 'research': {}, 'source': {
+    cat = {'version': 7, 'abilities': {}, 'weapons': {}, 'units': {}, 'squads': {}, 'research': {}, 'source': {
         'layers': [n for n, _ in vfs.archives], 'ucs': 'Engine/Locale/{Polish,English,Russian}/Engine.ucs'}}
 
     for p, (layer, t) in load('attrib\\abilities\\').items():

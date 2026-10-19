@@ -452,6 +452,18 @@ nakładka podsumowania z zakładkami.
   suma drużyny, wykres przewagi wartości armii, pod spodem bitwy.
 - Frakcja gracza (Recording.player_race): rasa większości jego encji wg katalogu (units[*].race), bez 'npc';
   w zakładkach "Nick (Frakcja)" (overlay.pname), nazwy race_* PL/EN/RU. Sprawdzone na 3v3, NEC-ORK, DE-TAU.
+- IKONY (2026-10-19): (1) część ebps podaje ikonę bez folderu (necron_wraith: 'necron_wraith_icon', oddział:
+  'necron_icons/necron_wraith_icon') – szukanie pliku po nazwie w dowolnym folderze ikon; (2) jednostka bez ikony
+  -> ikona oddziału, w którym występuje (Catalog._unit_squad); (3) brakujące .tga (Berserkerowie Khorne'a, drużyny
+  broni ciężkiej, Hell Talon, Marauder...) są tylko jako .rtx w <warstwa>Data-SharedTextures-Definitive.sga:
+  Relic Chunky FOLDTXTR, DATAATTR = (format 11, szer., wys., mipmapy), DATADATA = mipmapy DXT5 od największej bez
+  nagłówków (128x128/8 mipmap = 21872 B) – icons.read_rtx (dekoder DXT5 w czystym Pythonie, mipmapa <= 64 px).
+  Wynik: ikony 656/682; jednostki bez ikony tylko kampanijne/testowe (npc_*, thunderhawk, test_building).
+  Katalog v7. Badania ekonomiczne (zielone) potwierdzone w grze przez użytkownika (Ork vs Nekron).
+- Języki: ikony te same pliki dla PL/EN/RU (sprawdzone zrzutami EN i RU oraz zmianą języka w działającym podglądzie
+  pl -> ru: ikony i teksty poprawne); w katalogu każda pozycja z nazwą PL ma też EN i RU (jednostki 359, oddziały
+  207, badania 378, bronie 352, zdolności 334). Przy zmianie języka anulowany zaplanowany _tick starego okna
+  (wcześniej Tcl: invalid command name ..._tick).
 - WYCOFANE na prośbę użytkownika: stały rozmiar okna podsumowania (sum_w/sum_h) – okno znów dopasowuje się do treści.
 - ULEPSZENIA (badania) – ustalenia 2026-10-19:
   - SimEngine nie ma nic o badaniach; wszystko w DXP3Mod (napisy: "Research not found while loading Research Array

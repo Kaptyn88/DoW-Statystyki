@@ -47,12 +47,34 @@ Podgląd
 - Suwak "Czas" pokazuje stan z dowolnej chwili, "Na żywo" wraca do bieżącej.
 - "Otwórz…" – wcześniejsze nagrania (folder recordings obok Start.bat).
 
-Nakładka na grę
+Nakładki na grę
 ---------------
-Przycisk "Nakładka…" w Podglądzie: włącz, wybierz liczbę oddziałów (2–5), sortowanie,
-graczy, kolumny, przezroczystość, wielkość tekstu, sekcję zaznaczonego oddziału.
+Są dwie nakładki, każdą ustawiasz osobno (przycisk "Nakładka…" w Podglądzie):
+- Nakładka oddziału – oddział zaznaczony w grze: obrażenia, zabite i stracone modele,
+  wartość zniszczona i stracona.
+- Nakładka podsumowania – zakładki (pojedyncze można wyłączyć w ustawieniach):
+  Armia      – drużyna po lewej i po prawej, gracz z frakcją i jego najlepsze oddziały.
+  Straty     – ikony straconych jednostek i budynków z liczbą sztuk oraz ich wartość.
+  Ekonomia   – stan zasobów, dochód na minutę, zebrane łącznie, wykresy przewagi dochodu
+               (osobno rekwizycja i energia).
+  Ulepszenia – ukończone badania z czasem; badania ekonomiczne na zielono.
+  Budowa     – kiedy gracz pierwszy raz wystawił dany typ jednostki / postawił budynek
+               (budynki na złoto); przewijanie kółkiem myszy, gdy nakładka jest odblokowana.
+  Bitwy      – aktualna wartość armii, wykres przewagi wartości armii i największe bitwy.
+Skróty klawiszowe (działają w grze, do zmiany w ustawieniach):
+  F6 – pokaż/ukryj nakładkę oddziału, F7 – pokaż/ukryj podsumowanie, F8 – następna zakładka.
 Przeciągnij nakładkę myszą w wygodne miejsce i zaznacz "Zablokuj nakładkę" – wtedy kliknięcia
 przechodzą przez nią do gry. Działa w trybie okna bez ramki (domyślny w DE).
+
+Co oznaczają liczby:
+- R – rekwizycja, E – energia.
+- Straty i wartość armii to zasoby FAKTYCZNIE WYDANE: model kupiony razem z oddziałem ma cenę
+  modelu, dokupiony później – koszt uzupełnienia, lider – swoją cenę; doliczana jest płatna broń,
+  której model użył (broń kupiona, ale nieużyta, nie jest widoczna).
+- Anulowana budowa (gra zwraca zasoby) i budynki usunięte po przegranej nie są stratą.
+- Wartość armii – żywe jednostki, bez budynków.
+- Bitwy – okresy z największymi obrażeniami; pogrubione – mniejsze straty w tej bitwie.
+- Drużyny pochodzą z gry (sojusznik/wróg), frakcja gracza – z jego jednostek.
 
 Bezpieczeństwo
 --------------

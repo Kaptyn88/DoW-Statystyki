@@ -74,7 +74,7 @@ class Viewer(tk.Tk):
         self._catalog_job = None
         if not os.path.exists(paths.CATALOG_PATH) or recmodel.CATALOG.outdated():
             self._build_catalog()
-        self.after(1000, self._tick)
+        self._tick_job = self.after(1000, self._tick)
         if self.ov_settings.enabled or self.ov_settings.sum_enabled:
             self.after(200, self._overlay_changed)
 
@@ -167,6 +167,7 @@ class Viewer(tk.Tk):
         # stan potrzebny nowemu oknu – odczytany przed destroy(), potem zmienne Tk już nie działają
         self.restart = (self.rec.path if self.rec else None, self.follow_newest.get())
         self.overlays.hotkeys.stop()  # nowe okno zarejestruje te same klawisze
+        self.after_cancel(self._tick_job)  # bez odświeżenia zamkniętego okna (błąd Tcl "invalid command name")
         self.destroy()
 
     # ------------------------------------------------------------------ dane
@@ -277,7 +278,7 @@ class Viewer(tk.Tk):
             if self.overlays.poll_hotkeys(self.rec) and self.ov_window and self.ov_window.winfo_exists():
                 self.ov_window.refresh_from_settings()
         finally:
-            self.after(100, self._tick)
+            self._tick_job = self.after(100, self._tick)
 
     # ------------------------------------------------------------------ nakładka
     def _open_overlay_settings(self):

@@ -17,6 +17,28 @@ Interfejs: **polski, angielski, rosyjski** · UI: **Polish, English, Russian** �
 
 Wymagania: Windows 10/11 64-bit, DoW: Definitive Edition ze Steam (wersja 2.10.3.1). Nic więcej nie trzeba instalować.
 
+### Nakładki i co oznaczają liczby
+
+- **Nakładka oddziału** – oddział zaznaczony w grze: obrażenia, zabite i stracone modele, zniszczona i stracona
+  wartość. **Nakładka podsumowania** – zakładki poniżej (pojedyncze zakładki można wyłączyć w ustawieniach).
+- Skróty (działają w grze, do zmiany w Nakładka…): **F6** pokaż/ukryj nakładkę oddziału, **F7** pokaż/ukryj
+  podsumowanie, **F8** następna zakładka.
+- **R** – rekwizycja, **E** – energia.
+- **Armia** – drużyna po lewej, drużyna po prawej; gracz z frakcją i jego najlepsze oddziały w całym meczu.
+- **Straty** – stracone modele i budynki z ikonami oraz ich wartość. Wartość to **faktycznie wydane** zasoby:
+  model kupiony razem z oddziałem ma cenę modelu, dokupiony później – koszt uzupełnienia, lider – swoją cenę;
+  do modelu doliczana jest płatna broń, której użył (broń kupiona, ale nieużyta, nie jest widoczna). Anulowana
+  budowa (gra zwraca zasoby) i budynki usunięte po przegranej nie są stratą.
+- **Ekonomia** – stan zasobów, dochód na minutę, zebrane łącznie (bez zasobów startowych) i wykresy przewagi
+  dochodu osobno dla rekwizycji i energii.
+- **Ulepszenia** – ukończone badania z czasem; badania ekonomiczne (więcej rekwizycji/energii) na zielono.
+- **Budowa** – kiedy gracz pierwszy raz wystawił dany typ jednostki lub postawił budynek (budynki na złoto);
+  przewijanie kółkiem myszy, gdy nakładka jest odblokowana.
+- **Bitwy** – aktualna wartość armii (żywe jednostki, bez budynków; faktycznie wydane jak w Stratach), wykres
+  przewagi wartości armii oraz bitwy: okresy z największymi obrażeniami, obrażenia i straty każdej drużyny
+  (pogrubione – mniejsze straty w tej bitwie).
+- Drużyny pochodzą z gry (sojusznik/wróg); frakcja gracza – z jego jednostek.
+
 ## English
 
 Squad statistics for **Dawn of War: Definitive Edition** replays, similar to StarCraft II replay stats: damage dealt,
@@ -26,6 +48,12 @@ game shows its numbers. Download the zip from **[Releases](../../releases)**, ex
 in the game: Replays → choose a replay → Play. Details: `INSTRUCTIONS_EN.txt`. Works only while watching replays;
 game files are not modified.
 
+Summary overlay tabs (F7 show/hide, F8 next tab, F6 squad overlay): Army, Losses, Economy, Upgrades, Build order,
+Battles. R = requisition, P = power. Losses and army value count **resources actually spent**: models bought with
+the squad at model cost, later ones at reinforcement cost, leaders at their own cost, plus paid weapons the model
+used; cancelled construction (refunded) and buildings removed after defeat are not losses. Army value = living
+units without buildings. Battles = periods with the most damage (bold = smaller losses in that battle).
+
 ## Русский
 
 Статистика отрядов в реплеях **Dawn of War: Definitive Edition**, как в реплеях StarCraft II: нанесённый урон,
@@ -34,6 +62,13 @@ game files are not modified.
 показывается его статистика. Скачайте zip из **[Releases](../../releases)**, распакуйте, запустите **`Start.bat`**,
 затем в игре: Реплеи → выберите реплей → Воспроизвести. Подробности: `INSTRUKCIYA_RU.txt`. Работает только при
 просмотре реплеев; файлы игры не изменяются.
+
+Вкладки сводки (F7 показать/скрыть, F8 следующая вкладка, F6 оверлей отряда): Армия, Потери, Экономика, Улучшения,
+Порядок стройки, Битвы. Р – реквизиция, Э – энергия. Потери и стоимость армии считаются как **фактически
+потраченные** ресурсы: модели, купленные с отрядом, – по цене модели, добавленные позже – по цене пополнения,
+лидеры – по своей цене, плюс использованное платное оружие; отменённая стройка (ресурсы возвращаются) и здания,
+удалённые после поражения, не считаются потерями. Стоимость армии – живые юниты без зданий. Битвы – периоды с
+наибольшим уроном (жирным – меньшие потери в этой битве).
 
 ## Jak to działa
 

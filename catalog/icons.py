@@ -43,6 +43,48 @@ def read_tga(data):
     return w, h, rows
 
 
+def _rgb565(c):
+    return ((c >> 11) & 31) * 255 // 31, ((c >> 5) & 63) * 255 // 63, (c & 31) * 255 // 31
+
+
+def read_rtx(data, max_size=64):
+    """Tekstura Definitive Edition (.rtx, Relic Chunky FOLDTXTR): DATAATTR = (format, szer., wys., liczba mipmap),
+    DATADATA = wszystkie mipmapy DXT5 od największej, bez nagłówków (format 11; np. 128x128 i 8 mipmap = 21872 B).
+    Dekodujemy pierwszą mipmapę nie większą niż max_size -> (szer., wys., wiersze RGBA)."""
+    i = data.find(b'DATAATTR')
+    if i < 0:
+        raise ValueError('brak DATAATTR')
+    _, _, nl = struct.unpack_from('<III', data, i + 8)
+    fmt, w, h, mips = struct.unpack_from('<IIII', data, i + 20 + nl)
+    if fmt != 11:
+        raise ValueError(f'nieobsługiwany format rtx {fmt}')
+    j = data.find(b'DATADATA')
+    _, size, nl = struct.unpack_from('<III', data, j + 8)
+    p = j + 20 + nl
+    for _ in range(mips):  # pomijamy większe mipmapy
+        if w <= max_size and h <= max_size:
+            break
+        p += max(1, (w + 3) // 4) * max(1, (h + 3) // 4) * 16
+        w, h = max(1, w // 2), max(1, h // 2)
+    bw, bh = max(1, (w + 3) // 4), max(1, (h + 3) // 4)
+    px = [[(0, 0, 0, 0)] * (bw * 4) for _ in range(bh * 4)]
+    for by in range(bh):
+        for bx in range(bw):
+            a0, a1 = data[p], data[p + 1]
+            abits = int.from_bytes(data[p + 2:p + 8], 'little')
+            alpha = [a0, a1] + ([((6 - k) * a0 + (k + 1) * a1) // 7 for k in range(6)] if a0 > a1 else
+                                [((4 - k) * a0 + (k + 1) * a1) // 5 for k in range(4)] + [0, 255])
+            c0, c1, cbits = struct.unpack_from('<HHI', data, p + 8)
+            r0, r1 = _rgb565(c0), _rgb565(c1)
+            cols = [r0, r1, tuple((2 * x + y) // 3 for x, y in zip(r0, r1)), tuple((x + 2 * y) // 3 for x, y in zip(r0, r1))]
+            for k in range(16):
+                r, g, b = cols[(cbits >> (2 * k)) & 3]
+                px[by * 4 + k // 4][bx * 4 + k % 4] = (r, g, b, alpha[(abits >> (3 * k)) & 7])
+            p += 16
+    rows = [bytearray(b for x in range(w) for b in px[y][x]) for y in range(h)]
+    return w, h, rows
+
+
 def resize(w, h, rows, size):
     """Zmniejszenie do size x size średnią z bloków (z uwzględnieniem przezroczystości)."""
     out = []

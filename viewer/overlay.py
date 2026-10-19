@@ -700,7 +700,6 @@ class SummaryOverlay(OverlayWindow):
                 c.label(fmt_res(*l[i]), row, 3 + i, fg=colors[i], f=c.bold if i == win else c.font, anchor='e',
                         padx=(14, 0))
             row += 1
-        c.label(t('bat_note'), row, 0, fg='#6b747c', f=c.small, columnspan=5, pady=(4, 0))
 
 
 class Overlays:

@@ -14,7 +14,7 @@ TPS_DEFAULT = 8
 from i18n import lang, t
 from paths import CATALOG_PATH
 
-CATALOG_VERSION = 6  # 2: nazwy pl/en/ru; 3: ikony; 4: ceny modeli; 5: badania; 6: uzupełnienia, liderzy, ceny broni; starszy katalog podgląd buduje od nowa
+CATALOG_VERSION = 7  # 2: nazwy pl/en/ru; 3: ikony; 4: ceny modeli; 5: badania; 6: uzupełnienia, liderzy, ceny broni; 7: ikony .rtx; starszy katalog podgląd buduje od nowa
 ICONS_DIR = os.path.join(os.path.dirname(CATALOG_PATH), 'icons')
 ICON_SIZES = (20, 26, 32)  # jak catalog/icons.py
 
@@ -31,6 +31,7 @@ class Catalog:
         """Wczytuje (ponownie) catalog.json – np. po zbudowaniu go przy pierwszym uruchomieniu paczki."""
         path = self.path
         self._exists = {}
+        self._unit_squad_map = None
         try:
             with open(path, encoding='utf-8') as f:
                 self.c = json.load(f)
@@ -73,7 +74,22 @@ class Catalog:
                 uv = self.c.get('units', {}).get(u, {})
                 if uv.get('icon') in have:
                     return uv['icon']
-        return None
+        # jednostka bez własnej ikony (brak pliku w grze) – ikona oddziału, w którym występuje
+        owner = self._unit_squad().get((bp or '').lower())
+        return self.c['squads'][owner]['icon'] if owner else None
+
+    def _unit_squad(self):
+        """Jednostka -> oddział z ikoną, w którym występuje (raz na wczytanie katalogu)."""
+        m = self.__dict__.get('_unit_squad_map')
+        if m is None:
+            have = self.c.get('icons', {})
+            m = {}
+            for name, v in sorted(self.c.get('squads', {}).items()):
+                if v.get('icon') in have:
+                    for u in v.get('units', []):
+                        m.setdefault(u, name)
+            self._unit_squad_map = m
+        return m
 
     def ability_icon(self, name):
         v = self.c.get('abilities', {}).get((name or '').lower())
