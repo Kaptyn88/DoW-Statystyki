@@ -476,6 +476,8 @@ nakładka podsumowania z zakładkami.
   stylami okien (oba okna: NOACTIVATE, LAYERED, TRANSPARENT po zablokowaniu, MA_NOACTIVATE) i przez użytkownika w grze.
   Dziennik diagnostyczny (clickdebug) usunięty. Mekaniak Orków / Prorokini: bohater po odłączeniu od oddziału
   dostaje nowy numer oddziału – Recording.home_sq trzyma model przy pierwszym oddziale (wcześniej 4 wiersze).
+  Reguła ogólna (wszyscy dołączający dowódcy: Kapitan, Kapelan, Komisarz, Lord Chaosu, Prorokini...); "dom" z rekordu
+  seen (pierwsza sekunda istnienia), żeby dowódca dołączony przed pierwszą walką nie dostał cudzego oddziału.
 - URUCHAMIANIE PRZEZ STEAM (v2.1, 2026-10-23): launcher z --rec, gdy W40k.exe już działa, podłącza rejestrator
   (Attach): OpenProcess, czekanie na DLL moda, <folder DLL>\dowrec.cfg (UTF-16: OUT=, LOG=, ECO=) zamiast zmiennych
   środowiskowych (gra ze Steam ich nie ma), CreateRemoteThread(LoadLibraryW). DLL: bez DOWPROBE_LAUNCHER=1 czyta

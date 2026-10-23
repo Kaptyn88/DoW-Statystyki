@@ -215,6 +215,7 @@ class Recording:
         self.players = {}          # pid -> nazwa
         self.weapons = {}          # wid -> (nazwa, wręcz)
         self.units = {}            # klucz oddziału -> {'bp','pid','ents':set}
+        self.sq_bp = {}            # id oddziału -> blueprint oddziału (z rekordów 'ent' i 'seen')
         self.home_sq = {}          # id encji -> pierwszy oddział (statystyki zostają przy nim po przejściu do innego)
         self.last_sq = {}          # id encji -> ostatni niezerowy oddział
         self.ent_bp = {}           # id encji -> bp
@@ -292,8 +293,13 @@ class Recording:
                 # model w innym oddziale niż pierwszy (bohater dołącza do oddziałów / po odłączeniu gra tworzy mu nowy
                 # oddział, np. Mekaniak Orków miał 4 numery oddziału w jednym meczu) – zostaje przy pierwszym oddziale
                 home = self.home_sq.setdefault(r['id'], r['sq'])
+                self.sq_bp.setdefault(r['sq'], r['sqbp'])
                 if r['sq'] != home:
                     self.last_sq[r['id']] = home
+                    u = self.units.setdefault(unit_key(r['id'], home), {'bp': self.sq_bp.get(home) or r['bp'],
+                                                                         'pid': r['pid'], 'ents': set(),
+                                                                         'first': self.max_tick})
+                    u['ents'].add(r['id'])
                     return
                 self.last_sq[r['id']] = r['sq']
             elif r['id'] in self.last_sq:
@@ -573,6 +579,11 @@ class Recording:
         self.ent_pid.setdefault(eid, r['pid'])
         self.seen_tick.setdefault(eid, tick)
         self.max_tick = max(self.max_tick, tick)
+        if sq:
+            # pierwszy oddział modelu z jego pierwszej sekundy istnienia – dowódca dołączony do cudzego oddziału przed
+            # pierwszą walką nie dostanie przez to cudzego oddziału jako "domu" (rekord 'ent' powstaje dopiero w walce)
+            self.home_sq.setdefault(eid, sq)
+            self.sq_bp.setdefault(sq, r['sqbp'])
         if eid in self.model_value:
             return  # wartość ustalona przy pierwszym pojawieniu się (przejście do innego oddziału jej nie zmienia)
         cost = CATALOG.unit_cost(bp)
