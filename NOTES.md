@@ -477,6 +477,11 @@ nakładka podsumowania z zakładkami.
   nakładka (WS_EX_TRANSPARENT) problemu nie ma. Uruchamianie przez Steam – też v2.1.
 - NIEPRZETESTOWANE przed v2.0 (użytkownik zdecydował wydać): pełny przebieg z paczki przez Start.bat oraz
   wyłączanie się rejestratora w potyczce na żywo po zmianach v2.0 (kod: nowe rekordy tylko gdy g_armed).
+- v2.1 (2026-10-23): Budowa – pozycja przy każdym pojawieniu się typu, którego gracz nie miał (Recording.builds z
+  przejść 0 -> >0 w rekordach 'army'), np. drugi termogenerator po stracie/anulowaniu pierwszego (zgłoszenie
+  użytkownika); sprawdzone na anulowanych i ponownie postawionych generatorach SoB/Chaosu. Ekonomia: dochód na
+  10 s (Recording.INCOME_S), osobne kolumny R/E w kolorach RES_COLORS (bursztyn/niebieski), odstęp tysięcy (fmt_num).
+  Ten sam styl w Bitwach (wartość armii, straty w tabeli bitew – Cells.res/res_heads) i w sumie Strat.
 - WYCOFANE na prośbę użytkownika: stały rozmiar okna podsumowania (sum_w/sum_h) – okno znów dopasowuje się do treści.
 - ULEPSZENIA (badania) – ustalenia 2026-10-19:
   - SimEngine nie ma nic o badaniach; wszystko w DXP3Mod (napisy: "Research not found while loading Research Array

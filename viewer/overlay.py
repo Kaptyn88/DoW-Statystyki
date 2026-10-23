@@ -278,6 +278,17 @@ class Cells(list):
                      'anchor': anchor, 'padx': padx, 'pady': pady, 'image': image, 'span': columnspan,
                      'compound': compound})
 
+    def res(self, row, col, req, pw, f=None, padx=(14, 0)):
+        """Rekwizycja i energia w dwóch kolumnach (col, col + 1), w kolorach RES_COLORS, wyrównane do prawej."""
+        self.label(fmt_num(req), row, col, fg=RES_COLORS[0], f=f, anchor='e', padx=padx)
+        self.label(fmt_num(pw), row, col + 1, fg=RES_COLORS[1], f=f, anchor='e', padx=(8, 0))
+
+    def res_heads(self, row, col, title):
+        """Nagłówek grupy (nad dwiema kolumnami) + R / E w kolorach pod spodem (w wierszu row + 1)."""
+        self.label(title, row, col, fg='#6b747c', f=self.small, anchor='e', padx=(14, 0), columnspan=2)
+        self.label(t('res_r'), row + 1, col, fg=RES_COLORS[0], f=self.small, anchor='e', padx=(14, 0))
+        self.label(t('res_e'), row + 1, col + 1, fg=RES_COLORS[1], f=self.small, anchor='e', padx=(8, 0))
+
     def sep(self, row, span):
         self.append({'kind': 'sep', 'row': row, 'col': 0, 'span': span})
 
@@ -321,7 +332,8 @@ def draw_chart(cv, c):
     t0, t1 = pts[0][0], pts[-1][0]
     span = max(1, t1 - t0)
     ymax = max(abs(v) for _, v in pts)
-    nice = next((n for n in (50, 100, 150, 250, 500, 750, 1000, 1500, 2500, 5000, 10000) if n >= ymax), ymax or 1)
+    nice = next((n for n in (10, 20, 25, 50, 100, 150, 250, 500, 750, 1000, 1500, 2500, 5000, 10000) if n >= ymax),
+                ymax or 1)
     mid = (top + bottom) / 2
 
     def xy(tick, v):
@@ -354,6 +366,14 @@ def pname(rec, pid):
     name = rec.players.get(pid, '?')
     race = rec.player_race(pid)
     return f'{name} ({t("race_" + race)})' if race else name
+
+
+RES_COLORS = ('#e8b45a', '#6cb8e6')  # rekwizycja (bursztyn), energia (niebieski) – kolumny R/E
+
+
+def fmt_num(v):
+    """Liczba całkowita z odstępem tysięcy (wąska spacja niełamiąca), np. 12 345."""
+    return f'{v:,.0f}'.replace(',', '\u202f')
 
 
 def fmt_res(req, pw):
@@ -577,44 +597,46 @@ class SummaryOverlay(OverlayWindow):
             tot = collections.Counter()
             for p in team:
                 tot.update(st.player_totals(p))
-            c.label(fmt_res(tot['lost_req'], tot['lost_pow']), row, 0, fg='#9aa3ab', columnspan=LOST_PER_ROW,
+            c.label(f"{fmt_num(tot['lost_req'])} {t('res_r')}", row, 0, fg=RES_COLORS[0], f=c.bold, columnspan=3,
+                    pady=(2, 0))
+            c.label(f"{fmt_num(tot['lost_pow'])} {t('res_e')}", row, 3, fg=RES_COLORS[1], f=c.bold, columnspan=3,
                     pady=(2, 0))
             row += 1
         c.label(t('ov_losses_note'), row, 0, fg='#6b747c', f=c.small, columnspan=LOST_PER_ROW, pady=(4, 0))
 
     def _eco(self, rec, c, tick):
-        """Ekonomia: stan konta, dochód na minutę i zebrane łącznie każdego gracza (drużynami) + wykresy przewagi
-        dochodu drużyny 1 nad 2, osobno rekwizycja i energia. Dane: rekord 'eco' rejestratora (co ~1 s)."""
+        """Ekonomia: stan konta, dochód na 10 s i zebrane łącznie każdego gracza (drużynami; R i E w osobnych
+        kolumnach) + wykresy przewagi dochodu drużyny 1 nad 2, osobno rekwizycja i energia. Dane: rekord 'eco'."""
         if not rec.eco:
             c.label(t('eco_none'), 1, 0, fg='#6b747c', f=c.small, columnspan=6)
             return
         pcolor = self.colors(rec)
-        per_min = 60 * rec.tps
+        per = rec.INCOME_S * rec.tps
         teams = rec.teams()
         row = 1
         for i, head in enumerate((t('eco_col_bank'), t('eco_col_income'), t('eco_col_total'))):
-            c.label(head, row, 1 + i, fg='#6b747c', f=c.small, anchor='e', padx=(12, 0))
-        row += 1
+            c.res_heads(row, 1 + 2 * i, head)
+        row += 2
         for side, team in enumerate(teams):
             if side:
-                c.sep(row, 4)
+                c.sep(row, 7)
                 row += 1
             for pid in team:
                 e = rec.eco_at(pid)
                 c.label(pname(rec, pid), row, 0, fg=pcolor.get(pid, '#e6e9ec'), f=c.bold)
                 if e:
                     _, req, pw, ir, ip, cr, cp = e
-                    for i, (a, b) in enumerate(((req, pw), (ir * per_min, ip * per_min), (cr, cp))):
-                        c.label(fmt_res(a, b), row, 1 + i, anchor='e', padx=(12, 0))
+                    for i, (a, b) in enumerate(((req, pw), (ir * per, ip * per), (cr, cp))):
+                        c.res(row, 1 + 2 * i, a, b)
                 row += 1
         colors = [pcolor.get(team[0], '#e6e9ec') if team else '#e6e9ec' for team in teams]
         width, height = self.s.font_size * 46, self.s.font_size * 11
         names = [' · '.join(rec.players.get(p, '?') for p in team) for team in teams]
         charts = [('eco_chart_req', rec.income_advantage(teams, 3)), ('eco_chart_pow', rec.income_advantage(teams, 4))]
         for key, points in charts:
-            c.label(t(key, a=names[0], b=names[1]), row, 0, fg='#c0c6cc', f=c.small, columnspan=5, pady=(8, 0))
+            c.label(t(key, a=names[0], b=names[1]), row, 0, fg='#c0c6cc', f=c.small, columnspan=7, pady=(8, 0))
             row += 1
-            c.chart(row, 5, points, colors, width, height, fmt_time(tick, rec.tps))
+            c.chart(row, 7, points, colors, width, height, fmt_time(tick, rec.tps))
             row += 1
 
     def _research(self, rec, c):
@@ -697,7 +719,9 @@ class SummaryOverlay(OverlayWindow):
                  for team in teams]
         row = 1
         if rec.army:
-            c.label(t('bat_army_now'), row, 0, fg='#c0c6cc', f=c.small, columnspan=5)
+            c.label(t('bat_army_now'), row, 0, fg='#c0c6cc', f=c.small, columnspan=2)
+            c.label(t('res_r'), row, 2, fg=RES_COLORS[0], f=c.small, anchor='e', padx=(14, 0))
+            c.label(t('res_e'), row, 3, fg=RES_COLORS[1], f=c.small, anchor='e', padx=(8, 0))
             row += 1
             for side, team in enumerate(teams):
                 total = [0.0, 0.0]
@@ -705,35 +729,35 @@ class SummaryOverlay(OverlayWindow):
                     v = rec.army_value(pid)[0]
                     total = [total[0] + v[0], total[1] + v[1]]
                     c.label(pname(rec, pid), row, 0, fg=pcolor.get(pid, '#e6e9ec'), columnspan=2)
-                    c.label(fmt_res(*v), row, 2, anchor='e', padx=(14, 0))
+                    c.res(row, 2, *v)
                     row += 1
                 if len(team) > 1:
                     c.label(t('bat_team_total'), row, 0, fg='#9aa3ab', f=c.small, columnspan=2)
-                    c.label(fmt_res(*total), row, 2, fg=colors[side], f=c.bold, anchor='e', padx=(14, 0))
+                    c.res(row, 2, *total, f=c.bold)
                     row += 1
             full = [' · '.join(rec.players.get(p, '?') for p in team) for team in teams]
-            c.label(t('eco_chart_army', a=full[0], b=full[1]), row, 0, fg='#c0c6cc', f=c.small, columnspan=5,
+            c.label(t('eco_chart_army', a=full[0], b=full[1]), row, 0, fg='#c0c6cc', f=c.small, columnspan=7,
                     pady=(8, 0))
             row += 1
-            c.chart(row, 5, rec.army_advantage(teams), colors, self.s.font_size * 46, self.s.font_size * 11,
+            c.chart(row, 7, rec.army_advantage(teams), colors, self.s.font_size * 46, self.s.font_size * 11,
                     fmt_time(rec.max_tick, rec.tps))
             row += 1
         fights = rec.battles()
         if not fights:
             c.label('–', row, 0, fg='#6b747c')
             return
-        heads = (t('bat_col_time'), t('bat_col_dmg', n=names[0]), t('bat_col_dmg', n=names[1]),
-                 t('bat_col_lost', n=names[0]), t('bat_col_lost', n=names[1]))
-        for i, head in enumerate(heads):
-            c.label(head, row, i, fg='#6b747c', f=c.small, anchor='w' if i == 0 else 'e', padx=(0 if i == 0 else 14, 0))
-        row += 1
+        c.label(t('bat_col_time'), row, 0, fg='#6b747c', f=c.small, pady=(8, 0))
+        for i in (0, 1):
+            c.label(t('bat_col_dmg', n=names[i]), row, 1 + i, fg='#6b747c', f=c.small, anchor='e', padx=(14, 0),
+                    pady=(8, 0))
+            c.res_heads(row, 3 + 2 * i, t('bat_col_lost', n=names[i]))
+        row += 2
         for start, end, d, l in fights:
             win = 0 if sum(l[0]) < sum(l[1]) else 1  # drużyna z mniejszymi stratami – pogrubiona
             c.label(f'{fmt_time(start, rec.tps)}–{fmt_time(end, rec.tps)}', row, 0, fg='#c0c6cc')
             for i in (0, 1):
-                c.label(f'{d[i]:.0f}', row, 1 + i, fg=colors[i], anchor='e', padx=(14, 0))
-                c.label(fmt_res(*l[i]), row, 3 + i, fg=colors[i], f=c.bold if i == win else c.font, anchor='e',
-                        padx=(14, 0))
+                c.label(fmt_num(d[i]), row, 1 + i, fg=colors[i], anchor='e', padx=(14, 0))
+                c.res(row, 3 + 2 * i, *l[i], f=c.bold if i == win else None)
             row += 1
 
 

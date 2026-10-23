@@ -236,7 +236,8 @@ class Recording:
         self.seen_tick = {}        # id encji -> tick pierwszego rekordu 'seen'
         self.weapon_paid = set()   # (encja, id broni) z ceną, już doliczone
         self.army = {}             # pid -> lista (tick, {bp: liczba}) – wszystkie encje gracza (rekord 'army', przy zmianie)
-        self.first_seen = {}       # pid -> {bp: tick pierwszego pojawienia się} (kolejność budowy)
+        self.builds = {}           # pid -> [(tick, bp)] kolejność budowy (pojawienie się typu, którego gracz nie miał)
+        self._army_prev = {}       # pid -> ostatni skład (do wykrywania pojawień się)
         self.rel = {}              # (pid a, pid b) -> odpowiedzi World::QueryRelationship dla relacji 0..3 (rekord 'rel')
         self.research = {}         # pid -> lista (tick, nazwa badania) w kolejności ukończenia (rekord 'res')
         self.eco = {}              # pid -> lista (tick, rekwizycja, energia, dochód R/tick, dochód E/tick, zebrane R, zebrane E)
@@ -300,9 +301,14 @@ class Recording:
             self._add_seen(r)
         elif t == 'army':
             self.army.setdefault(r['pid'], []).append((r['tick'], r['n']))
-            seen = self.first_seen.setdefault(r['pid'], {})
-            for bp in r['n']:
-                seen.setdefault(bp, r['tick'])
+            # kolejność budowy: typ, którego gracz w ogóle nie miał (nigdy albo wszystkie stracone/anulowane), pojawia
+            # się w składzie -> nowa pozycja; np. drugi termogenerator po stracie/anulowaniu pierwszego (zgłoszenie
+            # użytkownika 2026-10-23). Pierwszy rekord gracza = to, co miał od startu – pomijamy.
+            prev = self._army_prev.get(r['pid'])
+            if prev is not None:
+                out = self.builds.setdefault(r['pid'], [])
+                out.extend((r['tick'], bp) for bp, n in sorted(r['n'].items()) if n > 0 and not prev.get(bp))
+            self._army_prev[r['pid']] = r['n']
             self.max_tick = max(self.max_tick, r['tick'])
         elif t == 'rel':
             self.rel[(r['a'], r['b'])] = tuple(r['q'])
@@ -369,17 +375,20 @@ class Recording:
         i = bisect.bisect_right(s, (tick, float('inf'))) - 1
         return s[i] if i >= 0 else None
 
+    INCOME_S = 10  # dochód pokazujemy na 10 s (prośba użytkownika 2026-10-23; wcześniej na minutę)
+
     def income_advantage(self, teams, which, points=120):
-        """Przewaga dochodu drużyny 0 nad 1 na minutę w czasie: [(tick, wartość)]; which = 3 (rekwizycja) / 4 (energia)."""
+        """Przewaga dochodu drużyny 0 nad 1 na INCOME_S sekund w czasie: [(tick, wartość)]; which = 3 (rekwizycja) /
+        4 (energia)."""
         ticks = sorted({e[0] for s in self.eco.values() for e in s})
         if not ticks:
             return []
         step = max(1, len(ticks) // points)
         out = []
-        per_min = 60 * self.tps
+        per = self.INCOME_S * self.tps
         for tick in ticks[::step] + ([ticks[-1]] if (len(ticks) - 1) % step else []):
             side = [sum((self.eco_at(p, tick) or (0,) * 7)[which] for p in team) for team in teams]
-            out.append((tick, round((side[0] - side[1]) * per_min, 1)))
+            out.append((tick, round((side[0] - side[1]) * per, 1)))
         return out
 
     def army_at(self, pid, tick=None):
@@ -434,13 +443,9 @@ class Recording:
         return out
 
     def build_order(self, pid):
-        """Kolejność budowy: [(tick, bp)] – typy jednostek/budynków w chwili pierwszego pojawienia się; to, co gracz
-        miał od startu (pierwszy rekord 'army'), pomijamy."""
-        s = self.army.get(pid)
-        if not s:
-            return []
-        start = set(s[0][1])
-        return sorted((tick, bp) for bp, tick in self.first_seen.get(pid, {}).items() if bp not in start)
+        """Kolejność budowy: [(tick, bp)] – pojawienie się typu jednostki/budynku, którego gracz nie miał (także
+        ponownie, gdy wcześniejsze egzemplarze zginęły albo budowę anulowano); bez tego, co gracz miał od startu."""
+        return list(self.builds.get(pid, []))
 
     def battles(self, bucket_s=10, top=6):
         """Największe bitwy: odcinki po bucket_s sekund z obrażeniami >= 25% najmocniejszego odcinka (sąsiednie, z
