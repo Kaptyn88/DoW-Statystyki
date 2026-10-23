@@ -12,7 +12,8 @@ Interfejs: **polski, angielski, rosyjski** · UI: **Polish, English, Russian** �
 ## Pobranie i użycie (dla graczy)
 
 1. Pobierz `DoW-Statystyki-<wersja>.zip` z zakładki **[Releases](../../releases)** i rozpakuj.
-2. Uruchom **`Start.bat`**, w grze otwórz **Powtórki → powtórka → Odtwórz**.
+2. Uruchom **`Start.bat`**, w grze otwórz **Powtórki → powtórka → Odtwórz**. Grę możesz też najpierw włączyć
+   przez Steam – `Start.bat` podłączy się do niej (jeśli powtórka już trwa, włącz ją ponownie).
 3. Szczegóły: `INSTRUKCJA.txt` w paczce.
 
 Wymagania: Windows 10/11 64-bit, DoW: Definitive Edition ze Steam (wersja 2.10.3.1). Nic więcej nie trzeba instalować.
@@ -29,7 +30,7 @@ Wymagania: Windows 10/11 64-bit, DoW: Definitive Edition ze Steam (wersja 2.10.3
   model kupiony razem z oddziałem ma cenę modelu, dokupiony później – koszt uzupełnienia, lider – swoją cenę;
   do modelu doliczana jest płatna broń, której użył (broń kupiona, ale nieużyta, nie jest widoczna). Anulowana
   budowa (gra zwraca zasoby) i budynki usunięte po przegranej nie są stratą.
-- **Ekonomia** – stan zasobów, dochód na minutę, zebrane łącznie (bez zasobów startowych) i wykresy przewagi
+- **Ekonomia** – stan zasobów, dochód na 10 s, zebrane łącznie (bez zasobów startowych) i wykresy przewagi
   dochodu osobno dla rekwizycji i energii.
 - **Ulepszenia** – ukończone badania z czasem; badania ekonomiczne (więcej rekwizycji/energii) na zielono.
 - **Budowa** – kiedy gracz pierwszy raz wystawił dany typ jednostki lub postawił budynek (budynki na złoto);
@@ -44,7 +45,7 @@ Wymagania: Windows 10/11 64-bit, DoW: Definitive Edition ze Steam (wersja 2.10.3
 Squad statistics for **Dawn of War: Definitive Edition** replays, similar to StarCraft II replay stats: damage dealt,
 models killed, damage taken and models lost for every squad, split by weapons, grenades and abilities (Dark Eldar
 soul powers as a separate row). A viewer window and a semi-transparent in-game overlay; selecting a squad in the
-game shows its numbers. Download the zip from **[Releases](../../releases)**, extract, run **`Start.bat`**, then
+game shows its numbers. Download the zip from **[Releases](../../releases)**, extract, run **`Start.bat`** (it can also attach to a game already started through Steam), then
 in the game: Replays → choose a replay → Play. Details: `INSTRUCTIONS_EN.txt`. Works only while watching replays;
 game files are not modified.
 
@@ -59,7 +60,7 @@ units without buildings. Battles = periods with the most damage (bold = smaller 
 Статистика отрядов в реплеях **Dawn of War: Definitive Edition**, как в реплеях StarCraft II: нанесённый урон,
 убитые модели, полученный урон и потери каждого отряда с разбивкой по оружию, гранатам и способностям (силы душ
 Тёмных эльдар отдельной строкой). Окно просмотра и полупрозрачный оверлей поверх игры; при выборе отряда в игре
-показывается его статистика. Скачайте zip из **[Releases](../../releases)**, распакуйте, запустите **`Start.bat`**,
+показывается его статистика. Скачайте zip из **[Releases](../../releases)**, распакуйте, запустите **`Start.bat`** (он может подключиться и к игре, уже запущенной через Steam),
 затем в игре: Реплеи → выберите реплей → Воспроизвести. Подробности: `INSTRUKCIYA_RU.txt`. Работает только при
 просмотре реплеев; файлы игры не изменяются.
 
