@@ -12,17 +12,19 @@ import threading
 import time
 import tkinter as tk
 from tkinter import filedialog, ttk
+from tkinter import font as tkfont
 
 import i18n
 import iconcache
 import paths
 import recmodel
 from i18n import t
-from overlay import Overlays, OverlaySettings, OverlaySettingsWindow
+from overlay import (Overlays, OverlaySettings, OverlaySettingsWindow, THEME, OVERLAY_COLORS,
+                     configure_app_style, fmt_num)
 from recmodel import Recording
 
 REC_DIR = paths.REC_DIR
-PLAYER_COLORS = ['#2f6fdf', '#d9452b', '#2e9e4f', '#b8860b', '#8e44ad', '#16a085', '#c0392b', '#7f8c8d']
+PLAYER_COLORS = OVERLAY_COLORS
 COLUMNS = [  # (id, klucz tekstu nagłówka, szerokość, wyrównanie)
     ('rank', None, 30, 'e'), ('unit', 'col_unit', 160, 'w'), ('player', 'col_player', 110, 'w'),
     ('dealt', 'col_dealt', 64, 'e'), ('share', 'col_share', 56, 'e'), ('kills', 'col_kills', 52, 'e'),
@@ -44,11 +46,9 @@ class Viewer(tk.Tk):
     def __init__(self, path, follow_newest=None):
         super().__init__()
         self.title(t('title'))
-        self.geometry('1260x700')
-        self.minsize(1140, 520)
-        style = ttk.Style(self)
-        style.theme_use('clam')
-        style.configure('Treeview', rowheight=24)  # miejsce na ikonę 20 px
+        self.geometry('1420x820')
+        self.minsize(1240, 640)
+        configure_app_style(self)
         iconcache.clear()
         self.restart = None       # (plik, śledź najnowsze) przy zmianie języka – main() tworzy okno od nowa
         self.rec = None
@@ -80,83 +80,118 @@ class Viewer(tk.Tk):
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
-        top = ttk.Frame(self, padding=(8, 6))
+        top = ttk.Frame(self, padding=(20, 16), style='Surface.TFrame')
         top.pack(fill='x')
-        ttk.Button(top, text=t('open'), command=self._choose_file).pack(side='left')
-        ttk.Button(top, text=t('overlay_btn'), command=self._open_overlay_settings).pack(side='left', padx=(6, 0))
-        ttk.Checkbutton(top, text=t('follow_newest'), variable=self.follow_newest).pack(side='left', padx=8)
-        ttk.Checkbutton(top, text=t('follow_sel'), variable=self.follow_selection).pack(side='left')
-        self.file_label = ttk.Label(top, text='', foreground='#555')
-        self.file_label.pack(side='left', padx=4)
-        ttk.Checkbutton(top, text=t('topmost'), variable=self.topmost,
-                        command=lambda: self.attributes('-topmost', self.topmost.get())).pack(side='right')
+        title = ttk.Frame(top, style='Surface.TFrame')
+        title.pack(side='left', fill='x', expand=True)
+        ttk.Label(title, text=t('title'), style='Surface.TLabel', font=('Segoe UI', 17, 'bold')).pack(anchor='w')
+        self.file_label = ttk.Label(title, text='', style='Surface.TLabel', foreground=THEME['muted'],
+                                    font=('Segoe UI', 9))
+        self.file_label.pack(anchor='w', pady=(5, 0))
+        ttk.Button(top, text=t('overlay_btn'), command=self._open_overlay_settings).pack(side='right')
+        ttk.Button(top, text=t('open'), style='Accent.TButton', command=self._choose_file).pack(
+            side='right', padx=(12, 8))
         lang_box = ttk.Combobox(top, textvariable=self.lang_var, values=list(i18n.LANGS.values()),
                                 state='readonly', width=9)
         lang_box.pack(side='right', padx=(0, 12))
         lang_box.bind('<<ComboboxSelected>>', lambda e: self._change_language())
-        ttk.Label(top, text=t('language')).pack(side='right', padx=(12, 2))
-        self.player_box = ttk.Combobox(top, textvariable=self.player_filter, state='readonly', width=22)
-        self.player_box.pack(side='right', padx=(0, 12))
-        ttk.Label(top, text=t('player')).pack(side='right', padx=(12, 2))
+        ttk.Label(top, text=t('language'), style='Surface.TLabel', foreground=THEME['muted']).pack(
+            side='right', padx=(8, 8))
+
+        controls = ttk.Frame(self, padding=(20, 10))
+        controls.pack(fill='x')
+        ttk.Checkbutton(controls, text=t('follow_newest'), variable=self.follow_newest).pack(side='left', padx=(0, 18))
+        ttk.Checkbutton(controls, text=t('follow_sel'), variable=self.follow_selection).pack(side='left')
+        ttk.Checkbutton(controls, text=t('topmost'), variable=self.topmost,
+                        command=lambda: self.attributes('-topmost', self.topmost.get())).pack(side='right')
+        self.player_box = ttk.Combobox(controls, textvariable=self.player_filter, state='readonly', width=22)
+        self.player_box.pack(side='right', padx=(8, 18))
+        ttk.Label(controls, text=t('player'), foreground=THEME['muted']).pack(side='right')
         self.player_box.bind('<<ComboboxSelected>>', lambda e: self.refresh())
 
-        tbar = ttk.Frame(self, padding=(8, 0))
+        tbar = ttk.Frame(self, padding=(20, 0, 20, 10))
         tbar.pack(fill='x')
-        ttk.Label(tbar, text=t('time')).pack(side='left')
+        ttk.Label(tbar, text=t('time'), foreground=THEME['muted']).pack(side='left')
         self.scale = ttk.Scale(tbar, from_=0, to=1, variable=self.time_var, command=self._on_scale)
-        self.scale.pack(side='left', fill='x', expand=True, padx=6)
-        self.time_label = ttk.Label(tbar, text='0:00 / 0:00', width=14)
+        self.scale.pack(side='left', fill='x', expand=True, padx=12)
+        self.time_label = ttk.Label(tbar, text='0:00 / 0:00', width=16, font=('Consolas', 10))
         self.time_label.pack(side='left')
-        ttk.Checkbutton(tbar, text=t('live'), variable=self.live, command=self.refresh).pack(side='left', padx=6)
-        self.rec_status = tk.Label(tbar, text='', width=32, anchor='w')
+        ttk.Checkbutton(tbar, text=t('live'), variable=self.live, command=self.refresh).pack(side='left', padx=12)
+        self.rec_status = tk.Label(tbar, text='', width=32, anchor='w', bg=THEME['bg'], font=('Segoe UI', 9))
         self.rec_status.pack(side='left')
 
         body = ttk.Frame(self)
-        body.pack(fill='both', expand=True, padx=8, pady=8)
-        body.columnconfigure(0, weight=3, minsize=720)  # tabela (z kolumną ikon) mieści wszystkie kolumny
+        body.pack(fill='both', expand=True, padx=20, pady=(0, 10))
+        body.columnconfigure(0, weight=3, minsize=760)
         body.columnconfigure(1, weight=2, minsize=420)
         body.rowconfigure(0, weight=1)
 
-        left = ttk.Frame(body)
+        left = ttk.Frame(body, style='Surface.TFrame', padding=(0, 0, 0, 0))
+        left.columnconfigure(0, weight=1)
+        left.rowconfigure(1, weight=1)
+        ttk.Label(left, text=t('view_ranking'), style='Surface.TLabel', font=('Segoe UI', 11, 'bold'),
+                  padding=(14, 12)).grid(row=0, column=0, columnspan=2, sticky='we')
         self.tree = ttk.Treeview(left, columns=[c[0] for c in COLUMNS], show='tree headings', selectmode='browse')
         self.tree.column('#0', width=34, minwidth=34, stretch=False, anchor='center')  # kolumna ikony
+        heading_font = tkfont.Font(self, family='Segoe UI', size=9, weight='bold')
         for cid, key, width, anchor in COLUMNS:
             head = t(key) if key else ('#' if cid == 'rank' else 'FF')
             self.tree.heading(cid, text=head, command=lambda c=cid: self._sort_by(c))
-            self.tree.column(cid, width=width, anchor=anchor, stretch=cid == 'unit')
+            self.tree.column(cid, width=max(width, heading_font.measure(head) + 16),
+                             anchor=anchor, stretch=cid == 'unit')
         sb = ttk.Scrollbar(left, orient='vertical', command=self.tree.yview)
-        self.tree.configure(yscrollcommand=sb.set)
-        self.tree.pack(side='left', fill='both', expand=True)
-        sb.pack(side='left', fill='y')
+        hsb = ttk.Scrollbar(left, orient='horizontal', command=self.tree.xview)
+        self.tree.configure(yscrollcommand=sb.set, xscrollcommand=hsb.set)
+        self.tree.grid(row=1, column=0, sticky='nsew')
+        sb.grid(row=1, column=1, sticky='ns')
+        hsb.grid(row=2, column=0, sticky='we')
         self.tree.bind('<<TreeviewSelect>>', self._on_select)
         left.grid(row=0, column=0, sticky='nsew')
 
-        right = ttk.Frame(body, padding=(10, 0))
-        self.d_title = ttk.Label(right, text=t('pick_squad'), font=('Segoe UI', 13, 'bold'), compound='left')
-        self.d_title.pack(anchor='w')
-        self.d_sub = ttk.Label(right, text='', foreground='#555')
-        self.d_sub.pack(anchor='w', pady=(0, 6))
-        self.d_cards = ttk.Frame(right)
+        right = ttk.Frame(body, padding=(16, 12), style='Surface.TFrame')
+        self.d_title = ttk.Label(right, text=t('pick_squad'), font=('Segoe UI', 14, 'bold'),
+                                 style='Surface.TLabel', compound='left', wraplength=400)
+        self.d_title.pack(anchor='w', fill='x')
+        self.d_sub = ttk.Label(right, text='', foreground=THEME['muted'], style='Surface.TLabel', wraplength=400)
+        self.d_sub.pack(anchor='w', fill='x', pady=(6, 12))
+        self.d_cards = ttk.Frame(right, style='Surface.TFrame')
         self.d_cards.pack(fill='x')
+        for col in range(3):
+            self.d_cards.columnconfigure(col, weight=1, uniform='cards')
         self.cards = {}
         for i, key in enumerate(('dealt', 'kills', 'rank', 'taken', 'lost', 'dpm')):
-            f = ttk.Frame(self.d_cards, padding=(0, 2, 16, 6))
-            f.grid(row=i // 3, column=i % 3, sticky='w')
-            ttk.Label(f, text=t('card_' + key), foreground='#666').pack(anchor='w')
-            v = ttk.Label(f, text='–', font=('Segoe UI', 15, 'bold'))
+            f = ttk.Frame(self.d_cards, padding=(10, 8))
+            f.grid(row=i // 3, column=i % 3, sticky='nsew', padx=3, pady=3)
+            ttk.Label(f, text=t('card_' + key), foreground=THEME['muted'], wraplength=115).pack(anchor='w')
+            v = ttk.Label(f, text='–', font=('Consolas', 11 if key == 'rank' else 19, 'bold'),
+                          foreground=THEME['accent'] if key == 'dealt' else THEME['text'],
+                          wraplength=115, justify='left')
             v.pack(anchor='w')
             self.cards[key] = v
-        ttk.Label(right, text=t('timeline'), foreground='#666').pack(anchor='w', pady=(6, 0))
-        self.canvas = tk.Canvas(right, height=90, background='white', highlightthickness=1, highlightbackground='#ddd')
+        ttk.Label(right, text=t('timeline'), foreground=THEME['muted'], style='Surface.TLabel').pack(
+            anchor='w', pady=(14, 6))
+        self.canvas = tk.Canvas(right, height=90, background=THEME['bg'], highlightthickness=1,
+                                highlightbackground=THEME['border'])
         self.canvas.pack(fill='x', pady=(2, 8))
         self.canvas.bind('<Configure>', lambda e: self._draw_timeline())
-        self.d_text = tk.Text(right, height=18, wrap='none', relief='flat', background=self.cget('background'),
-                              font=('Consolas', 9))
-        self.d_text.pack(fill='both', expand=True)
-        self.d_text.tag_configure('h', font=('Segoe UI', 10, 'bold'))
-        right.grid(row=0, column=1, sticky='nsew')
+        detail = ttk.Frame(right, style='Surface.TFrame')
+        detail.pack(fill='both', expand=True)
+        detail.columnconfigure(0, weight=1)
+        detail.rowconfigure(0, weight=1)
+        self.d_text = tk.Text(detail, height=12, wrap='none', relief='flat', background=THEME['surface'],
+                              foreground=THEME['text'], selectbackground=THEME['selected'],
+                              insertbackground=THEME['text'], highlightthickness=0, font=('Consolas', 9))
+        self.d_text.grid(row=0, column=0, sticky='nsew')
+        dsb = ttk.Scrollbar(detail, orient='vertical', command=self.d_text.yview)
+        dsb.grid(row=0, column=1, sticky='ns')
+        dhsb = ttk.Scrollbar(detail, orient='horizontal', command=self.d_text.xview)
+        dhsb.grid(row=1, column=0, sticky='we')
+        self.d_text.configure(yscrollcommand=dsb.set, xscrollcommand=dhsb.set)
+        self.d_text.tag_configure('h', font=('Segoe UI', 10, 'bold'), foreground=THEME['accent'],
+                                  spacing1=8, spacing3=5)
+        right.grid(row=0, column=1, sticky='nsew', padx=(12, 0))
 
-        self.status = ttk.Label(self, text='', foreground='#555', padding=(8, 0, 8, 4))
+        self.status = ttk.Label(self, text='', foreground=THEME['quiet'], padding=(20, 4, 20, 12))
         self.status.pack(fill='x')
 
     def _change_language(self):
@@ -356,9 +391,9 @@ class Viewer(tk.Tk):
             c = st.S[k]
             p = rec.units.get(k, {}).get('pid')
             img = iconcache.photo(st.unit_icon(k, 20))
-            vals = (place[k] + 1, rec.unit_label(k), rec.players.get(p, '?'), f"{c['dealt']:.0f}",
-                    f"{100 * c['dealt'] / total:.1f}%", c['kills'], f"{c['taken']:.0f}", c['lost'],
-                    f"{c['ff']:.0f}" if c['ff'] else '')
+            vals = (place[k] + 1, rec.unit_label(k), rec.players.get(p, '?'), fmt_num(c['dealt']),
+                    f"{100 * c['dealt'] / total:.1f}%", c['kills'], fmt_num(c['taken']), c['lost'],
+                    fmt_num(c['ff']) if c['ff'] else '')
             spec = (vals, f'p{p}', str(img or ''))
             iid = old.pop(k, None)
             if iid is None:
@@ -387,10 +422,10 @@ class Viewer(tk.Tk):
         except OSError:
             recording = False
         if recording:
-            self.rec_status.configure(text=t('recording'), fg='#1e8e3e')
+            self.rec_status.configure(text=t('recording'), fg=THEME['success'])
         else:
             # rejestrator nie odróżnia pauzy od końca powtórki – oba wyglądają jak brak nowych ticków
-            self.rec_status.configure(text=t('no_data'), fg='#888')
+            self.rec_status.configure(text=t('no_data'), fg=THEME['quiet'])
 
     def _show_detail(self):
         rec, k = self.rec, self.selected
@@ -413,12 +448,12 @@ class Viewer(tk.Tk):
             dpm = c['dealt'] / active_min
         else:
             dpm = 0
-        self.cards['dealt'].configure(text=f"{c['dealt']:.0f}")
+        self.cards['dealt'].configure(text=fmt_num(c['dealt']))
         self.cards['kills'].configure(text=str(c['kills']))
         self.cards['rank'].configure(text=t('rank_val', r=r_all, n=n_all, ro=r_own, no=n_own) if r_all else '–')
-        self.cards['taken'].configure(text=f"{c['taken']:.0f}")
+        self.cards['taken'].configure(text=fmt_num(c['taken']))
         self.cards['lost'].configure(text=str(c['lost']))
-        self.cards['dpm'].configure(text=f'{dpm:.0f}')
+        self.cards['dpm'].configure(text=fmt_num(dpm))
 
         tx = self.d_text
         tx.configure(state='normal')
@@ -457,10 +492,10 @@ class Viewer(tk.Tk):
             bh = (h - 14) * hp / peak
             cv.create_rectangle(b * bw + 1, h - 12 - bh, (b + 1) * bw - 1, h - 12, fill=color, outline='')
         x = w * self._current_tick() / max(1, rec.max_tick)
-        cv.create_line(x, 0, x, h - 12, fill='#999', dash=(2, 2))
+        cv.create_line(x, 0, x, h - 12, fill=THEME['accent'], dash=(2, 2))
         for m in range(0, int(rec.max_tick / rec.tps / 60) + 1, 2):
             xm = w * m * 60 * rec.tps / max(1, rec.max_tick)
-            cv.create_text(xm + 2, h - 6, text=f'{m}:00', anchor='w', fill='#888', font=('Segoe UI', 7))
+            cv.create_text(xm + 2, h - 6, text=f'{m}:00', anchor='w', fill=THEME['muted'], font=('Segoe UI', 7))
 
 
 def main():
