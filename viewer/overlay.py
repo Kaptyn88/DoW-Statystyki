@@ -204,12 +204,14 @@ class OverlayWindow(tk.Toplevel):
 
     def apply_window_style(self):
         self.update_idletasks()
+        # Najpierw przezroczystość, POTEM nasze style: przy alfa = 1.0 Tk wyłącza WS_EX_LAYERED i nadpisuje rozszerzone
+        # style okna, kasując WS_EX_NOACTIVATE/TRANSPARENT – od v2.0 podsumowanie (domyślnie nieprzezroczyste) nie
+        # przepuszczało kliknięć i kliknięcie zabierało grze aktywność, więc gra stawała (2026-10-23: ex = 0x8).
+        # Alfa najwyżej 0.99 (niewidoczna różnica), żeby Tk zostawał przy oknie warstwowym.
+        self.attributes('-alpha', max(0.2, min(0.99, getattr(self.s, self.OPACITY))))
         if not set_click_through(self, self.locked):
             self.after(100, self.apply_window_style)  # okno jeszcze nie zmapowane – ponów
             return
-        # przezroczystość po zmianie stylu – Tk ustawia wtedy atrybuty warstwy na właściwym oknie
-        self.attributes('-alpha', 1.0)
-        self.attributes('-alpha', max(0.2, min(1.0, getattr(self.s, self.OPACITY))))
         self.configure(cursor='' if self.locked else 'fleur')
 
     # -- treść
@@ -633,8 +635,8 @@ class SummaryOverlay(OverlayWindow):
         width, height = self.s.font_size * 46, self.s.font_size * 11
         names = [' · '.join(rec.players.get(p, '?') for p in team) for team in teams]
         charts = [('eco_chart_req', rec.income_advantage(teams, 3)), ('eco_chart_pow', rec.income_advantage(teams, 4))]
-        for key, points in charts:
-            c.label(t(key, a=names[0], b=names[1]), row, 0, fg='#c0c6cc', f=c.small, columnspan=7, pady=(8, 0))
+        for (key, points), fg in zip(charts, RES_COLORS):  # nagłówek w kolorze zasobu (jak kolumny R/E)
+            c.label(t(key, a=names[0], b=names[1]), row, 0, fg=fg, f=c.small, columnspan=7, pady=(8, 0))
             row += 1
             c.chart(row, 7, points, colors, width, height, fmt_time(tick, rec.tps))
             row += 1

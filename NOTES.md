@@ -469,7 +469,14 @@ nakładka podsumowania z zakładkami.
   Uruchamianie przez Steam (podpięcie do gry uruchomionej przez Steam) przesunięte do v2.1.
 - Skróty: Shift+F8 = poprzednia zakładka (domyślnie), opcjonalne skróty do każdej zakładki (key_tabs, domyślnie
   brak, sekcja zwinięta w ustawieniach); hotkeys.py obsługuje Shift+/Ctrl+ (MOD_SHIFT/MOD_CONTROL).
-- NIEROZWIĄZANE (na v2.1): kliknięcie w ODBLOKOWANĄ nakładkę PODSUMOWANIA na chwilę zatrzymuje grę (nakładka
+- ROZWIĄZANE w v2.1 (2026-10-23): zatrzymywanie gry przy kliknięciu w podsumowanie. Przyczyna: przy alfa = 1.0
+  (domyślna przezroczystość podsumowania od v2.0) Tk wyłącza WS_EX_LAYERED i nadpisuje rozszerzone style okna –
+  podsumowanie miało ex = 0x8 (bez NOACTIVATE/TRANSPARENT/LAYERED), więc kliknięcie aktywowało jego okno i gra
+  traciła fokus. Poprawka: apply_window_style ustawia najpierw alfa (najwyżej 0.99), POTEM nasze style. Sprawdzone
+  stylami okien (oba okna: NOACTIVATE, LAYERED, TRANSPARENT po zablokowaniu, MA_NOACTIVATE) i przez użytkownika w grze.
+  Dziennik diagnostyczny (clickdebug) usunięty. Mekaniak Orków / Prorokini: bohater po odłączeniu od oddziału
+  dostaje nowy numer oddziału – Recording.home_sq trzyma model przy pierwszym oddziale (wcześniej 4 wiersze).
+- (stare) NIEROZWIĄZANE (na v2.1): kliknięcie w ODBLOKOWANĄ nakładkę PODSUMOWANIA na chwilę zatrzymuje grę (nakładka
   oddziału – nie). Poprawka WM_MOUSEACTIVATE -> MA_NOACTIVATE (podmiana procedury okna, overlay._no_activate_on_click)
   potwierdzona komunikatem (SendMessage zwraca 3), ale w grze nie pomogła. Do zbadania: co robi klik w podsumowaniu
   (pasek zakładek -> _set_tab: s.save() zapis pliku + pełne przerysowanie; kółko; przeciąganie geometry()), czy gra

@@ -215,6 +215,7 @@ class Recording:
         self.players = {}          # pid -> nazwa
         self.weapons = {}          # wid -> (nazwa, wręcz)
         self.units = {}            # klucz oddziału -> {'bp','pid','ents':set}
+        self.home_sq = {}          # id encji -> pierwszy oddział (statystyki zostają przy nim po przejściu do innego)
         self.last_sq = {}          # id encji -> ostatni niezerowy oddział
         self.ent_bp = {}           # id encji -> bp
         self.ent_pid = {}          # id encji -> gracz
@@ -288,6 +289,12 @@ class Recording:
             self.ent_bp[r['id']] = r['bp']
             self.ent_pid[r['id']] = r['pid']
             if r['sq']:
+                # model w innym oddziale niż pierwszy (bohater dołącza do oddziałów / po odłączeniu gra tworzy mu nowy
+                # oddział, np. Mekaniak Orków miał 4 numery oddziału w jednym meczu) – zostaje przy pierwszym oddziale
+                home = self.home_sq.setdefault(r['id'], r['sq'])
+                if r['sq'] != home:
+                    self.last_sq[r['id']] = home
+                    return
                 self.last_sq[r['id']] = r['sq']
             elif r['id'] in self.last_sq:
                 return  # wypięty z oddziału (starsze nagrania) – zostaje przy dawnym oddziale
@@ -592,7 +599,8 @@ class Recording:
         return bp.endswith('_hq') or '_hq_' in bp
 
     def _key(self, eid, sq):
-        return unit_key(eid, sq or self.last_sq.get(eid, 0))
+        home = self.home_sq.get(eid)
+        return unit_key(eid, home or sq or self.last_sq.get(eid, 0))
 
     def _source_key(self, r):
         """Klucz źródła obrażeń bez WeaponInfo: nazwa zdolności albo wspólna pozycja "bez nazwy".
