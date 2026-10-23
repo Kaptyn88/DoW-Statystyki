@@ -2,10 +2,11 @@
 // (tylko do powtórek offline).
 //
 // Użycie: dowprobe_launcher.exe [--rec] [--out <nagrania>] [--logs <dzienniki>] [folder_gry]
+//   v2.1: gdy gra już działa (np. uruchomiona przez Steam), z --rec podłącza do niej rejestrator (Attach)
 //   folder gry domyślnie z bibliotek Steam (libraryfolders.vdf, aplikacja 3556750), inaczej domyślna ścieżka
 //   --rec  ładuje dowrec.dll zamiast sondy i ustawia DOWREC_OUT=<projekt>\recordings
 // - nie modyfikuje plików gry,
-// - odmawia startu, jeśli W40k.exe już działa,
+// - jeśli W40k.exe już działa: z --rec podłącza rejestrator (dowrec.cfg zamiast zmiennych), bez --rec odmawia,
 // - ustawia DOWPROBE_LAUNCHER=1 i DOWPROBE_LOG=<ścieżka> (bez tego DLL nic nie robi),
 // - po załadowaniu DLL moda (W40kMod/WXPMod/DXP2Mod/DXP3Mod) wstrzykuje dowprobe.dll przez CreateRemoteThread(LoadLibraryW).
 
@@ -20,15 +21,15 @@
 
 static const wchar_t* kDefaultGameDir = L"C:\\Program Files (x86)\\Steam\\steamapps\\common\\Dawn of War Definitive Edition";
 
-static bool IsRunning(const wchar_t* exe)
+static DWORD FindProcess(const wchar_t* exe)
 {
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     PROCESSENTRY32W pe = { sizeof(pe) };
-    bool found = false;
+    DWORD pid = 0;
     for (BOOL ok = Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe))
-        if (_wcsicmp(pe.szExeFile, exe) == 0) { found = true; break; }
+        if (_wcsicmp(pe.szExeFile, exe) == 0) { pid = pe.th32ProcessID; break; }
     CloseHandle(snap);
-    return found;
+    return pid;
 }
 
 static bool HasModule(HANDLE proc, const wchar_t* name)
@@ -140,11 +141,68 @@ static const wchar_t* T(const wchar_t* pl, const wchar_t* en, const wchar_t* ru)
     return g_lang == 0 ? pl : g_lang == 2 ? ru : en;
 }
 
+// v2.1: podłączenie rejestratora do gry, która już działa (np. uruchomionej przez Steam). Gra nie ma zmiennych
+// środowiskowych launchera, więc ustawienia (folder nagrań, dziennik) zapisujemy w <folder DLL>\dowrec.cfg – DLL
+// czyta go przy wczytaniu i usuwa. Bezpiecznik bez zmian: rejestrator włącza się dopiero po otwarciu powtórki,
+// więc jeśli powtórka już trwa, trzeba wyjść do menu i włączyć ją ponownie.
+static int Attach(DWORD pid, const std::wstring& dll, const wchar_t* recDir, const wchar_t* logPath,
+                  const std::wstring& ecoPath)
+{
+    HANDLE proc = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION |
+                              PROCESS_VM_WRITE | PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid);
+    if (!proc) {
+        wprintf(T(L"Nie można podłączyć się do działającej gry (błąd %lu).\n",
+                  L"Cannot attach to the running game (error %lu).\n",
+                  L"Не удалось подключиться к запущенной игре (ошибка %lu).\n"), GetLastError());
+        return 3;
+    }
+    if (HasModule(proc, L"dowrec.dll")) {
+        wprintf(T(L"Rejestrator jest już podłączony do gry. W grze: Powtórki -> wybierz powtórkę -> Odtwórz.\n",
+                  L"The recorder is already attached. In the game: Replays -> choose a replay -> Play.\n",
+                  L"Регистратор уже подключён. В игре: Реплеи -> выберите реплей -> Воспроизвести.\n"));
+        CloseHandle(proc);
+        return 0;
+    }
+    wprintf(T(L"Gra już działa – podłączam rejestrator...\n", L"The game is already running – attaching the recorder...\n",
+              L"Игра уже запущена – подключаю регистратор...\n"));
+    static const wchar_t* mods[] = { L"DXP3Mod.dll", L"DXP2Mod.dll", L"WXPMod.dll", L"W40kMod.dll" };
+    bool ready = false;
+    while (!ready) {  // gra mogła dopiero startować – czekamy na DLL moda jak przy zwykłym uruchomieniu
+        for (const wchar_t* m : mods) if (HasModule(proc, m)) { ready = true; break; }
+        if (!ready && WaitForSingleObject(proc, 500) == WAIT_OBJECT_0) {
+            wprintf(T(L"Gra została zamknięta.\n", L"The game was closed.\n", L"Игра была закрыта.\n"));
+            CloseHandle(proc);
+            return 2;
+        }
+    }
+    std::wstring cfg = dll.substr(0, dll.find_last_of(L'\\')) + L"\\dowrec.cfg";
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, cfg.c_str(), L"w, ccs=UTF-16LE") == 0 && f) {
+        fwprintf(f, L"OUT=%ls\nLOG=%ls\n", recDir, logPath);
+        if (!ecoPath.empty()) fwprintf(f, L"ECO=%ls\n", ecoPath.c_str());
+        fclose(f);
+    }
+    bool ok = Inject(proc, dll);
+    DeleteFileW(cfg.c_str());  // DLL usuwa go sama; tu na wypadek nieudanego wczytania
+    CloseHandle(proc);
+    if (ok)
+        wprintf(T(L"Gotowe. W grze: Powtórki -> wybierz powtórkę -> Odtwórz.\n"
+                  L"Jeśli powtórka już trwa – wyjdź do menu i włącz ją ponownie (rejestrator startuje przy otwarciu powtórki).\n",
+                  L"Ready. In the game: Replays -> choose a replay -> Play.\n"
+                  L"If a replay is already playing, return to the menu and start it again (the recorder starts when a replay is opened).\n",
+                  L"Готово. В игре: Реплеи -> выберите реплей -> Воспроизвести.\n"
+                  L"Если реплей уже идёт – вернитесь в меню и запустите его снова (регистратор включается при открытии реплея).\n"));
+    else
+        wprintf(T(L"Wczytanie rejestratora NIE powiodło się (błąd %lu).\n", L"Loading the recorder FAILED (error %lu).\n",
+                  L"Не удалось загрузить регистратор (ошибка %lu).\n"), GetLastError());
+    return ok ? 0 : 3;
+}
+
 int wmain(int argc, wchar_t** argv)
 {
     // dowprobe_launcher.exe [--rec] [--eco] [--out <folder nagrań>] [--logs <folder dzienników>] [--check] [--where] [folder_gry]
     //   --eco    jak --rec + sonda ekonomii (zrzuty pamięci obiektów graczy co 5 s, analysis/eco_scan.py)
-    //   --check  tylko sprawdź: gra znaleziona i nie działa (kod 0) – komunikat w języku użytkownika (Start.bat)
+    //   --check  tylko sprawdź: gra znaleziona (kod 0; działająca gra nie jest błędem – Attach) – komunikat w języku użytkownika (Start.bat)
     // polskie znaki i cyrylica: w konsoli UTF-16 (WriteConsoleW), przy przekierowaniu do pliku/potoku UTF-8
     _setmode(_fileno(stdout), GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) == FILE_TYPE_CHAR ? _O_U16TEXT : _O_U8TEXT);
     bool rec = false, check = false, where = false, eco = false;
@@ -176,13 +234,15 @@ int wmain(int argc, wchar_t** argv)
                   L"Dawn of War: Definitive Edition не найдена в библиотеках Steam.\nУбедитесь, что игра установлена через Steam.\n"));
         return 1;
     }
-    if (IsRunning(L"W40k.exe")) {
-        wprintf(T(L"Gra już działa. Zamknij Dawn of War i uruchom Start.bat ponownie.\n",
-                  L"The game is already running. Close Dawn of War and run Start.bat again.\n",
-                  L"Игра уже запущена. Закройте Dawn of War и снова запустите Start.bat.\n"));
+    // v2.1: działająca gra (np. uruchomiona przez Steam) nie jest błędem – rejestrator podłączamy do niej (Attach)
+    DWORD runningPid = FindProcess(L"W40k.exe");
+    if (check) return 0;
+    if (runningPid && !rec) {
+        wprintf(T(L"Gra już działa. Zamknij Dawn of War i uruchom ponownie.\n",
+                  L"The game is already running. Close Dawn of War and try again.\n",
+                  L"Игра уже запущена. Закройте Dawn of War и попробуйте снова.\n"));
         return 1;
     }
-    if (check) return 0;
     if (GetFileAttributesW(dll.c_str()) == INVALID_FILE_ATTRIBUTES) { wprintf(L"%ls: %ls\n", T(L"Brak", L"Missing", L"Нет файла"), dll.c_str()); return 1; }
 
     // log: --logs albo <folder launchera>\..\logs\probe_YYYYMMDD_HHMMSS.log
@@ -201,9 +261,10 @@ int wmain(int argc, wchar_t** argv)
         CreateDirectoryW(recDir, nullptr);
         SetEnvironmentVariableW(L"DOWREC_OUT", recDir);
     }
+    std::wstring ecoName;
     if (eco) {  // --eco: rejestrator dodatkowo zrzuca co 5 s pamięć obiektów graczy do <dzienniki>\eco_<data>.bin
         // name = "\rec_YYYYMMDD_HHMMSS.log" -> "\eco_YYYYMMDD_HHMMSS.bin" w tym samym folderze co dziennik
-        std::wstring ecoName = full;
+        ecoName = full;
         ecoName = ecoName.substr(0, ecoName.find_last_of(L'\\')) + L"\\eco" + (name + 4);
         ecoName = ecoName.substr(0, ecoName.size() - 4) + L".bin";
         SetEnvironmentVariableW(L"DOWREC_ECO", ecoName.c_str());
@@ -216,6 +277,7 @@ int wmain(int argc, wchar_t** argv)
     wprintf(L"%ls: %ls\nDLL: %ls\nLog: %ls\n", T(L"Gra", L"Game", L"Игра"), exe.c_str(), dll.c_str(), full);
     if (rec) wprintf(L"%ls: %ls\n", T(L"Nagrania", L"Recordings", L"Записи"), recDir);
     wprintf(L"\n");
+    if (runningPid) return Attach(runningPid, dll, recDir, full, ecoName);
 
     STARTUPINFOW si = { sizeof(si) };
     PROCESS_INFORMATION pi = {};

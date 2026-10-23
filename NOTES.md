@@ -476,6 +476,14 @@ nakładka podsumowania z zakładkami.
   stylami okien (oba okna: NOACTIVATE, LAYERED, TRANSPARENT po zablokowaniu, MA_NOACTIVATE) i przez użytkownika w grze.
   Dziennik diagnostyczny (clickdebug) usunięty. Mekaniak Orków / Prorokini: bohater po odłączeniu od oddziału
   dostaje nowy numer oddziału – Recording.home_sq trzyma model przy pierwszym oddziale (wcześniej 4 wiersze).
+- URUCHAMIANIE PRZEZ STEAM (v2.1, 2026-10-23): launcher z --rec, gdy W40k.exe już działa, podłącza rejestrator
+  (Attach): OpenProcess, czekanie na DLL moda, <folder DLL>\dowrec.cfg (UTF-16: OUT=, LOG=, ECO=) zamiast zmiennych
+  środowiskowych (gra ze Steam ich nie ma), CreateRemoteThread(LoadLibraryW). DLL: bez DOWPROBE_LAUNCHER=1 czyta
+  dowrec.cfg obok siebie i go usuwa; bez pliku nic nie robi. Gdy dowrec.dll już jest w procesie – nie wstrzykuje
+  drugi raz (sprawdzone na działającej grze). --check nie traktuje działającej gry jako błędu; start.bat/Start.bat
+  podłączają się. Bezpiecznik bez zmian (rejestrator startuje przy otwarciu .rec) – trwającą powtórkę trzeba
+  włączyć ponownie. POTWIERDZONE 2026-10-23: gra ze Steam, podłączenie w menu, powtórka DE vs TAU zapisuje się
+  (GUARD -> WLACZONY, rekordy meta/eco/rel/seen/army/ent/sel/hp), dowrec.cfg usunięty po odczycie.
 - (stare) NIEROZWIĄZANE (na v2.1): kliknięcie w ODBLOKOWANĄ nakładkę PODSUMOWANIA na chwilę zatrzymuje grę (nakładka
   oddziału – nie). Poprawka WM_MOUSEACTIVATE -> MA_NOACTIVATE (podmiana procedury okna, overlay._no_activate_on_click)
   potwierdzona komunikatem (SendMessage zwraca 3), ale w grze nie pomogła. Do zbadania: co robi klik w podsumowaniu

@@ -4,12 +4,7 @@ setlocal
 cd /d "%~dp0"
 title DoW - statystyki powtorek
 
-tasklist /FI "IMAGENAME eq W40k.exe" 2>nul | find /I "W40k.exe" >nul
-if not errorlevel 1 (
-    echo Gra juz dziala. Zamknij Dawn of War i uruchom start.bat ponownie.
-    pause
-    exit /b 1
-)
+rem v2.1: gra moze juz dzialac (np. uruchomiona przez Steam) - launcher podlaczy do niej rejestrator
 
 rem 1. srodowisko Pythona (podglad uzywa tylko biblioteki standardowej)
 if not exist ".venv\Scripts\pythonw.exe" (

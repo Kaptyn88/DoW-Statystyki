@@ -17,7 +17,8 @@ Requirements
 Starting
 --------
 1. Extract the whole folder anywhere (e.g. Documents\DoW-Statystyki). Do not run it from inside the zip.
-2. Close the game if it is running.
+2. You can start the game through Steam first – Start.bat attaches to it. If a replay is already
+   playing, return to the menu and start it again (the recorder starts when a replay is opened).
 3. Double-click Start.bat.
    - On first start Windows may show "Windows protected your PC" (the programs are not signed):
      click "More info" -> "Run anyway".
@@ -77,7 +78,7 @@ What the numbers mean:
 
 Safety
 ------
-- Game files are NOT modified. The recorder is loaded only into a game started with Start.bat.
+- Game files are NOT modified. The recorder is loaded only into a game started or attached with Start.bat.
 - It works only while replays are played. When you start a live match it switches itself off.
   For online / ranked games start the game normally through Steam, not with Start.bat.
 - An antivirus may complain (the tool attaches to the game process). It is the same mechanism

@@ -1164,18 +1164,40 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID)
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
     DisableThreadLibraryCalls(inst);
     g_selfBase = (uintptr_t)inst; g_selfSize = ModuleSize(g_selfBase);
-    wchar_t flag[16] = {0}, logPath[MAX_PATH] = {0};
-    if (!GetEnvironmentVariableW(L"DOWPROBE_LAUNCHER", flag, 16) || wcscmp(flag, L"1") != 0) return TRUE;
-    if (!GetEnvironmentVariableW(L"DOWREC_OUT", g_outDir, MAX_PATH)) return TRUE;
-    if (!GetEnvironmentVariableW(L"DOWPROBE_LOG", logPath, MAX_PATH)) return TRUE;
+    wchar_t flag[16] = {0}, logPath[MAX_PATH] = {0}, ecoPath[MAX_PATH] = {0};
+    if (GetEnvironmentVariableW(L"DOWPROBE_LAUNCHER", flag, 16) && wcscmp(flag, L"1") == 0) {
+        // gra uruchomiona przez launcher: ustawienia w zmiennych środowiskowych
+        if (!GetEnvironmentVariableW(L"DOWREC_OUT", g_outDir, MAX_PATH)) return TRUE;
+        if (!GetEnvironmentVariableW(L"DOWPROBE_LOG", logPath, MAX_PATH)) return TRUE;
+        GetEnvironmentVariableW(L"DOWREC_ECO", ecoPath, MAX_PATH);
+    } else {
+        // v2.1: podłączenie do działającej gry (np. ze Steam) – launcher zapisał <folder DLL>\dowrec.cfg
+        // (OUT=, LOG=, ECO=); bez tego pliku DLL nic nie robi. Plik usuwamy po odczycie.
+        wchar_t cfg[MAX_PATH];
+        DWORD n = GetModuleFileNameW(inst, cfg, MAX_PATH);
+        wchar_t* slash = n ? wcsrchr(cfg, L'\\') : nullptr;
+        if (!slash) return TRUE;
+        wcscpy_s(slash + 1, MAX_PATH - (slash + 1 - cfg), L"dowrec.cfg");
+        FILE* f = nullptr;
+        if (_wfopen_s(&f, cfg, L"r, ccs=UTF-16LE") != 0 || !f) return TRUE;
+        wchar_t line[MAX_PATH + 8];
+        while (fgetws(line, MAX_PATH + 8, f)) {
+            line[wcscspn(line, L"\r\n")] = 0;
+            if (!wcsncmp(line, L"OUT=", 4)) wcscpy_s(g_outDir, line + 4);
+            else if (!wcsncmp(line, L"LOG=", 4)) wcscpy_s(logPath, line + 4);
+            else if (!wcsncmp(line, L"ECO=", 4)) wcscpy_s(ecoPath, line + 4);
+        }
+        fclose(f);
+        DeleteFileW(cfg);
+        if (!g_outDir[0] || !logPath[0]) return TRUE;
+    }
     CreateDirectoryW(g_outDir, nullptr);
     g_log = _wfsopen(logPath, L"wb", _SH_DENYWR);
     if (!g_log) return TRUE;
     g_entSquad = new std::unordered_map<unsigned long, unsigned long>();
     g_players  = new std::unordered_set<unsigned long>();
     g_playerObj = new std::unordered_map<unsigned long, uintptr_t>();
-    wchar_t ecoPath[MAX_PATH] = {0};
-    if (GetEnvironmentVariableW(L"DOWREC_ECO", ecoPath, MAX_PATH)) g_eco = _wfsopen(ecoPath, L"wb", _SH_DENYWR);
+    if (ecoPath[0]) g_eco = _wfsopen(ecoPath, L"wb", _SH_DENYWR);
     g_weapons  = new std::unordered_set<int>();
     g_lastMelee = new std::unordered_map<unsigned long, int>();
     g_armEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);

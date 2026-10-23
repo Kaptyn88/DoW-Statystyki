@@ -18,7 +18,8 @@ Wymagania
 Uruchamianie
 ------------
 1. Rozpakuj cały folder w dowolne miejsce (np. Dokumenty\DoW-Statystyki). Nie uruchamiaj z wnętrza zipa.
-2. Zamknij grę, jeśli działa.
+2. Grę możesz uruchomić wcześniej przez Steam – Start.bat podłączy się do niej. Jeśli powtórka
+   już trwa, wyjdź do menu i włącz ją ponownie (rejestrator startuje przy otwarciu powtórki).
 3. Kliknij dwa razy Start.bat.
    - Przy pierwszym uruchomieniu Windows może pokazać "System Windows ochronił ten komputer"
      (programy nie są podpisane): kliknij "Więcej informacji" -> "Uruchom mimo to".
@@ -79,7 +80,7 @@ Co oznaczają liczby:
 
 Bezpieczeństwo
 --------------
-- Pliki gry NIE są zmieniane. Rejestrator wczytuje się tylko do gry uruchomionej przez Start.bat.
+- Pliki gry NIE są zmieniane. Rejestrator wczytuje się tylko do gry uruchomionej albo podłączonej przez Start.bat.
 - Działa tylko przy odtwarzaniu powtórek. Gdy zaczniesz mecz na żywo, sam się wyłącza.
   Do gry sieciowej / rankingowej uruchamiaj grę normalnie przez Steam, nie przez Start.bat.
 - Program antywirusowy może się czepiać (dołączanie się do procesu gry). To ten sam mechanizm,
